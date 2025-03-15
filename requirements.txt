@@ -1,0 +1,6 @@
+selenium
+python-dotenv
+pandas
+openpyxl
+webdriver_manager
+pyautogui
