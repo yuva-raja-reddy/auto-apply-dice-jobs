@@ -17,3 +17,6 @@
 
 /* Ignore json file */
 *.json
+
+word_count_results.txt
+main_backup.py

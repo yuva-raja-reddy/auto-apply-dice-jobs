@@ -142,9 +142,6 @@ def get_total_jobs(driver):
     """
     try:
         wait = WebDriverWait(driver, 30)
-        
-        # Apply filters before retrieving job count
-        apply_filters(driver)
 
         job_count_element = wait.until(EC.presence_of_element_located((By.XPATH, "//span[@id='totalJobCount']")))
         total_jobs_text = job_count_element.text.strip().replace(",", "")  # Remove commas before conversion
@@ -156,7 +153,7 @@ def get_total_jobs(driver):
         print("Error retrieving total job count:", e)
         return 0
 
-def search_jobs(driver):
+def search_jobs(driver,DICE_SEARCH_QUERY):
     """
     Manually enters job search criteria and clicks the search button.
     
@@ -215,7 +212,8 @@ def get_job_links(driver):
                 if job_url:
                     job_url = f"https://www.dice.com/job-detail/{job_url}"
             except Exception as e:
-                print(f"Error retrieving job ID: {e}")
+                pass
+                # print(f"Error retrieving job ID: {e}")
 
             try:
                 job_company = job.find_element(By.XPATH, ".//a[@data-cy='search-result-company-name']").text.strip()
@@ -278,7 +276,7 @@ def apply_to_job_url(driver, job_url):
         # Use ActionChains to move the mouse pointer to the apply button and click
         actions = ActionChains(driver)
         actions.move_to_element(apply_button_container).pause(1).click().perform()
-        print("Clicked Easy Apply button using mouse pointer.")
+        # print("Clicked Easy Apply button using mouse pointer.")
  
         # Locate the 'Next' button using a robust XPath
         next_button = wait.until(EC.presence_of_element_located((By.XPATH, "//button[contains(@class, 'btn-next') and normalize-space()='Next']")))
@@ -290,9 +288,9 @@ def apply_to_job_url(driver, job_url):
         try:
             next_button.click()
         except Exception as click_exception:
-            print("Normal click next button failed, trying JavaScript click.")
+            # print("Normal click next button failed, trying JavaScript click.")
             driver.execute_script("arguments[0].click();", next_button)
-            print("Clicked Next button using JavaScript.")
+            # print("Clicked Next button using JavaScript.")
         # time.sleep(2)
 
         try:
@@ -306,14 +304,14 @@ def apply_to_job_url(driver, job_url):
             # Click the 'Submit' button using ActionChains
             actions = ActionChains(driver)
             actions.move_to_element(submit_button).pause(1).click().perform()
-            print("Clicked Submit button using mouse pointer.")
+            # print("Clicked Submit button using mouse pointer.")
 
             # Wait for the page to refresh and check for the confirmation banner
             try:
                 confirmation_banner = WebDriverWait(driver, 10).until(
                     EC.presence_of_element_located((By.XPATH, "//header[contains(@class, 'post-apply-banner')]//h1[contains(text(), 'Application submitted')]"))
                 )
-                print("Application successfully submitted!")
+                # print("Application successfully submitted!")
                 applied = True
 
                 # Close the current job tab and switch back to the main search tab
@@ -321,14 +319,15 @@ def apply_to_job_url(driver, job_url):
                 driver.switch_to.window(driver.window_handles[0])
                 return applied
             except Exception:
-                print("Application submission confirmation not found. Might have failed.")
+                # print("Application submission confirmation not found. Might have failed.")
                 applied = False
 
         except Exception as e:
-            print("Error interacting with Submit button:", e)
+            # print("Error interacting with Submit button:", e)
             applied = False
     except Exception as e:
-        print(f"Error applying to job at {job_url}")
+        pass
+        # print(f"Error applying to job at {job_url}")
     driver.close()
     driver.switch_to.window(driver.window_handles[0])
     return applied
@@ -354,9 +353,10 @@ def main():
     applied_jobs_file = "applied_jobs.xlsx"
     not_applied_jobs_file = "not_applied_jobs.xlsx"
     job_report_file = "job_application_report.xlsx"
-
-    # Delete existing files before login to start fresh
-    for file in [not_applied_jobs_file, job_report_file]:
+    excluded_jobs_file = "excluded_jobs.xlsx"
+ 
+    # Delete existing files before login to start fresh (excluding applied_jobs.xlsx)
+    for file in [not_applied_jobs_file, job_report_file, excluded_jobs_file]:
         if os.path.exists(file):
             os.remove(file)
             print(f"Deleted old {file} to start fresh.")
@@ -374,38 +374,91 @@ def main():
     try:
         if login_to_dice(driver):
             print("Login successful. Starting job search...")
-            driver.execute_script("document.body.style.zoom='75%'")
-            # Perform job search manually
-            search_jobs(driver)
 
-            # Get the total job count after applying filters
-            total_jobs = get_total_jobs(driver)
-            job_data["Total Jobs Posted Today"] = total_jobs
+            collected_jobs = {}  # Dictionary to hold unique jobs by final redirected URL
 
-            # Calculate number of pages
-            jobs_per_page = 100
-            total_pages = (total_jobs // jobs_per_page) + (1 if total_jobs % jobs_per_page > 0 else 0)
-
-            # Iterate through pages
-            for page in range(1, total_pages + 1):
-                print(f"Scraping page {page}...")
-                job_data["jobs"].extend(get_job_links(driver))
-
-                # Update the page number in the URL instead of clicking the button
-                current_url = driver.current_url
-                next_page_url = re.sub(r"page=\d+", f"page={page + 1}", current_url) if "page=" in current_url else f"{current_url}&page={page + 1}"
+            for idx, query in enumerate(DICE_SEARCH_QUERIES):
+                print(f"=== Processing search query {idx+1}/{len(DICE_SEARCH_QUERIES)}: {query} ===")
                 
-                print(f"Navigating to next page: {next_page_url}")
-                driver.get(next_page_url)
-                time.sleep(2)  # Allow time for page load
+                # move pointer to prevent sleeping
+                pyautogui.moveRel(1, 1, duration=0.1)
+                pyautogui.moveRel(-1, -1, duration=0.1)
 
-                # Save data to Excel after each page
-                save_to_excel(job_data)
+                # For the first query, use search_jobs (which applies filters) and for subsequent ones, use search_additional_jobs
+                if idx == 0:
+                    DICE_SEARCH_QUERY = query
+                    search_jobs(driver,DICE_SEARCH_QUERY)
+                    # Apply filters before retrieving job count
+                    apply_filters(driver)
 
-            # Save final data to JSON
-            with open("job_data.json", "w") as json_file:
-                json.dump(job_data, json_file, indent=4)
-            print("Job data saved to job_data.json")
+                else:
+                    search_additional_jobs(driver, query)
+                
+                total_jobs = get_total_jobs(driver)
+                jobs_per_page = 100
+                total_pages = (total_jobs // jobs_per_page) + (1 if total_jobs % jobs_per_page > 0 else 0)
+                print(f"Total jobs for query '{query}': {total_jobs} across {total_pages} pages")
+                
+                query_jobs = {}  # Temporary dictionary for jobs found for this query
+
+                for page in range(1, total_pages + 1):
+                    print(f"Scraping page {page} for query: {query}")
+                    jobs = get_job_links(driver)
+                    print(f"  Found {len(jobs)} jobs on page {page}")
+                    for job in jobs:
+                        # If the job URL is not already present, add it.
+                        if job["Job URL"] not in collected_jobs:
+                            query_jobs[job["Job URL"]] = job
+
+                    # Navigate to next page by updating URL (avoid clicking next button)
+                    current_url = driver.current_url
+                    if "page=" in current_url:
+                        next_page_url = re.sub(r"page=\d+", f"page={page + 1}", current_url)
+                    else:
+                        next_page_url = f"{current_url}&page={page + 1}"
+                    driver.get(next_page_url)
+                    time.sleep(2)
+                
+                # Log and merge the results for this query
+                print(f"Query '{query}' returned {len(query_jobs)} unique jobs.")
+                collected_jobs.update(query_jobs)
+                # Optionally, you could save query_jobs to a temporary file here if needed
+
+            # Merge all job details into job_data and proceed with further processing (filtering, applying, etc.)
+            job_data["jobs"] = list(collected_jobs.values())
+            print(f"Total unique jobs collected from all queries: {len(job_data['jobs'])}")
+            
+            # # Perform job search manually
+            # search_jobs(driver)
+
+            # # Get the total job count after applying filters
+            # total_jobs = get_total_jobs(driver)
+            # job_data["Total Jobs Posted Today"] = total_jobs
+
+            # # Calculate number of pages
+            # jobs_per_page = 100
+            # total_pages = (total_jobs // jobs_per_page) + (1 if total_jobs % jobs_per_page > 0 else 0)
+
+            # # Iterate through pages
+            # for page in range(1, total_pages + 1):
+            #     print(f"Scraping page {page}...")
+            #     job_data["jobs"].extend(get_job_links(driver))
+
+            #     # Update the page number in the URL instead of clicking the button
+            #     current_url = driver.current_url
+            #     next_page_url = re.sub(r"page=\d+", f"page={page + 1}", current_url) if "page=" in current_url else f"{current_url}&page={page + 1}"
+                
+            #     print(f"Navigating to next page: {next_page_url}")
+            #     driver.get(next_page_url)
+            #     time.sleep(2)  # Allow time for page load
+
+            #     # Save data to Excel after each page
+            #     save_to_excel(job_data)
+
+            # # Save final data to JSON
+            # with open("job_data.json", "w") as json_file:
+            #     json.dump(job_data, json_file, indent=4)
+            # print("Job data saved to job_data.json")
 
             # Load existing applied and not-applied jobs to avoid redundant processing
             # Files already defined and recreated at startup
@@ -438,11 +491,54 @@ def main():
             # Filter jobs before applying
             pending_jobs = [job for job in job_data["jobs"] if job["Job URL"] not in existing_applied_jobs]
             print(f"==========> Total jobs to process: {len(pending_jobs)}")
-
+            
+            try:
+                excluded_jobs = []
+                filtered_jobs = []
+                
+                for job in pending_jobs:
+                    job_title = job["Job Title"].lower()
+                    
+                    # If both keyword lists are empty, accept all jobs
+                    if not EXCLUDE_KEYWORDS and not INCLUDE_KEYWORDS:
+                        filtered_jobs.append(job)
+                    # If only EXCLUDE_KEYWORDS is set
+                    elif EXCLUDE_KEYWORDS and not INCLUDE_KEYWORDS:
+                        if any(exclude.lower() in job_title for exclude in EXCLUDE_KEYWORDS):
+                            job["Exclusion Reason"] = "Excluded based on exclusion keyword match"
+                            excluded_jobs.append(job)
+                        else:
+                            filtered_jobs.append(job)
+                    # If only INCLUDE_KEYWORDS is set
+                    elif INCLUDE_KEYWORDS and not EXCLUDE_KEYWORDS:
+                        if any(include.lower() in job_title for include in INCLUDE_KEYWORDS):
+                            filtered_jobs.append(job)
+                        else:
+                            job["Exclusion Reason"] = "Excluded due to not matching inclusion keywords"
+                            excluded_jobs.append(job)
+                    # If both are set
+                    else:
+                        if any(include.lower() in job_title for include in INCLUDE_KEYWORDS) and not any(exclude.lower() in job_title for exclude in EXCLUDE_KEYWORDS):
+                            filtered_jobs.append(job)
+                        else:
+                            job["Exclusion Reason"] = "Excluded based on combined filter criteria"
+                            excluded_jobs.append(job)
+                
+                print(f"==========> Excluded {len(excluded_jobs)} jobs based on filtering criteria.")
+                print(f"==========> Proceeding with {len(filtered_jobs)} jobs after filtering.")
+                
+                # Save excluded jobs to an Excel file for reference
+                df_excluded = pd.DataFrame(excluded_jobs)
+                df_excluded.to_excel("excluded_jobs.xlsx", index=False)
+                
+                # Update pending jobs to only include filtered ones
+                pending_jobs = filtered_jobs
+            except Exception as e:
+                print(f"Error with applying filter: {e}")
             # Process only pending jobs
             for job in pending_jobs:
                 if not job["Applied"] and job["Job URL"] != "Unknown":
-                    print(f"Processing application for job: {job['Job Title']}")
+                    # print(f"Processing application for job: {job['Job Title']}")
                     applied = apply_to_job_url(driver, job["Job URL"])
                     job["Applied"] = applied
                     if applied:
@@ -480,6 +576,21 @@ def main():
         pass
         # driver.quit()
 
+def search_additional_jobs(driver, query):
+    wait = WebDriverWait(driver, 10)
+    try:
+        input_field = wait.until(EC.presence_of_element_located((By.ID, "typeaheadInput")))
+        input_field.clear()
+        input_field.send_keys(query)
+
+        search_button = wait.until(EC.element_to_be_clickable((By.ID, "submitSearch-button")))
+        search_button.click()
+
+        print(f"Searching for jobs: {query}")
+        time.sleep(2)
+    except Exception as e:
+        print(f"Error while searching for jobs: {query}", e)
+
 def test_apply_single_job(job_url):
     """
     Logs in and applies to a single job URL for testing purposes.
@@ -506,6 +617,18 @@ def test_apply_single_job(job_url):
 
 if __name__ == "__main__":
     # Search in dice
-    DICE_SEARCH_QUERY="AI ML" # Change to which jobs you are applying for.
+    DICE_SEARCH_QUERIES = ["AI ML", "Gen AI", "Agentic AI", "Data Engineer", "Data Analyst", "Machine Learning"]  # You can update this list anytime
+
+    # Optional: Define keywords for filtering job applications, if you menion anything here it will apply that job roles only.
+    # if you dont know anything just dont mention anthing here in INCLUDE_KEYWORDS
+    EXCLUDE_KEYWORDS = []  # Add more if needed
+    INCLUDE_KEYWORDS = []  # Add more if needed
+
+    # Example:
+    # EXCLUDE_KEYWORDS = ["Manager", "Director",".net", "SAP","java"]  # Add more if needed
+    # INCLUDE_KEYWORDS = ["AI", "Artificial","Inteligence","Machine","Learning", "ML", "Data", "NLP", "ETL",
+    # "Natural Language Processing" ,"engineer","analyst","scientist","senior","cloud", 
+    # "aws","gcp","Azure","agentic","python","rag","llm"]  # Add more if needed
+
     main()
     # test_apply_single_job("https://www.dice.com/job-detail/48ff85b2-6984-4105-b5c6-ea5e5d969a3d")

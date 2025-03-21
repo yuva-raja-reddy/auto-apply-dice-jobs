@@ -72,3 +72,42 @@ python open_not_applied_jobs.py
 - The bot prevents duplicate applications by referencing `applied_jobs_reference.xlsx`.
 - The script waits and interacts dynamically to handle page loads.
 - The automation ensures a smooth job application process while allowing manual intervention when needed.
+
+### V2 Updates
+
+**What’s New in V2:**
+
+- **Multiple Search Queries:**  
+  Instead of a single search term, you can pass a list of queries via `DICE_SEARCH_QUERIES`.  
+  **Example:**
+  ```python
+  DICE_SEARCH_QUERIES = ["Machine Learning", "Data Scientist", "AI Engineer"]
+  ```
+  The code loops through each query, scrapes job details for all pages, and deduplicates job listings based on the final redirected URL.
+
+- **Advanced Filtering Logic:**  
+  You now have two optional lists:  
+  - `EXCLUDE_KEYWORDS` (e.g., `["Manager", ".NET"]`) – jobs containing any of these words in the title are excluded.  
+  - `INCLUDE_KEYWORDS` (e.g., `["AI", "Data", "ML"]`) – only jobs with at least one of these words are considered.  
+  If both are provided, a job is applied to only if it includes an inclusion term and does not contain any exclusion terms. Jobs that do not match either list are also excluded.  
+  **Example:**
+  ```python
+  EXCLUDE_KEYWORDS = ["Manager", "Lead", "Director", "Sr.", "VP"]
+  INCLUDE_KEYWORDS = ["AI", "ML", "Data", "NLP"]
+  ```
+  Excluded jobs are saved in `excluded_jobs.xlsx` with an additional column `"Exclusion Reason"` indicating why the job was filtered out.
+
+
+- **Brave Browser Configuration:**  
+  The bot uses Brave browser for automation.  
+  **For macOS:**  
+  The default Brave path is set as:
+  ```python
+  brave_path = "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
+  ```
+  **For Windows:**  
+  Update the path in `get_brave_driver()` to:
+  ```python
+  brave_path = "C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe"
+  ```
+  Adjust this path as needed based on your installation.
