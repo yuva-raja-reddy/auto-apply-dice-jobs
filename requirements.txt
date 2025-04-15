@@ -1,0 +1,8 @@
+selenium==4.29.0
+python-dotenv==1.0.1
+pandas==2.2.3
+openpyxl==3.1.5
+webdriver_manager==4.0.2
+pyautogui==0.9.54
+requests==2.32.3
+beautifulsoup4==4.13.3

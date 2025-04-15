@@ -1,0 +1,4379 @@
+
+[Skipped] Binary or non-UTF-8 file: /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/.DS_Store
+
+
+======= Contents of /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/requirements.txt =======
+
+selenium==4.29.0
+python-dotenv==1.0.1
+pandas==2.2.3
+openpyxl==3.1.5
+webdriver_manager==4.0.2
+pyautogui==0.9.54
+requests==2.32.3
+beautifulsoup4==4.13.3
+
+
+
+======= Contents of /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/job_application_summary.json =======
+
+{
+    "Total Jobs Found": 437,
+    "Jobs Applied": 93,
+    "Jobs Failed": 25,
+    "Execution Time": "0h 16m 43.97s",
+    "Date": "2025-04-15 10:47:28"
+}
+
+[Skipped] Binary or non-UTF-8 file: /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/not_applied_jobs.xlsx
+
+
+======= Contents of /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/__init__.py =======
+
+
+
+
+======= Contents of /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/app_tkinter.py =======
+
+# dice_auto_apply/app_tkinter.py
+
+import os
+import sys
+import tkinter as tk
+from tkinter import ttk, messagebox, scrolledtext
+import threading
+import pandas as pd
+from datetime import datetime
+import time
+import logging
+import pyautogui
+import subprocess
+
+# Try both absolute and relative imports for compatibility
+try:
+    from core.browser_detector import get_browser_path
+    from core.dice_login import login_to_dice, update_dice_credentials, validate_dice_credentials
+    from core.main_script import get_web_driver, fetch_jobs_with_requests, apply_to_job_url
+except ImportError:
+    try:
+        from core.browser_detector import get_browser_path
+        from core.dice_login import login_to_dice, update_dice_credentials, validate_dice_credentials
+        from core.main_script import get_web_driver, fetch_jobs_with_requests, apply_to_job_url
+    except ImportError:
+        from core.browser_detector import get_browser_path
+        from core.dice_login import login_to_dice, update_dice_credentials, validate_dice_credentials
+        from core.main_script import get_web_driver, fetch_jobs_with_requests, apply_to_job_url
+
+
+
+def fix_imports():
+    """Fix imports for both development and packaged environments"""
+    import os
+    import sys
+    
+    # Add the parent directory to the path if not already there
+    parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if parent_dir not in sys.path:
+        sys.path.insert(0, parent_dir)
+
+# Call this at the beginning of your script
+fix_imports()
+
+class DiceAutoBotApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Dice Auto Apply Bot")
+        self.root.geometry("900x700")
+        
+        # Set app icon if available
+        try:
+            icon_path = os.path.join(os.path.dirname(__file__), "resources", "app_icon.png")
+            if os.path.exists(icon_path):
+                # For Windows
+                if sys.platform == 'win32':
+                    self.root.iconbitmap(icon_path)
+                # For macOS and others that support .png icons
+                else:
+                    img = tk.PhotoImage(file=icon_path)
+                    self.root.iconphoto(True, img)
+        except Exception as e:
+            pass
+        
+        # Disable PyAutoGUI failsafe
+        pyautogui.FAILSAFE = False
+        
+        # Configure logging
+        self.setup_logging()
+        
+        # Initialize variables
+        self.driver = None
+        self.job_thread = None
+        self.running = False
+        
+        # Load configuration if exists
+        self.load_config()
+        
+        # Create the tabs
+        self.notebook = ttk.Notebook(root)
+        self.notebook.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Create tab frames
+        self.main_tab = ttk.Frame(self.notebook)
+        self.settings_tab = ttk.Frame(self.notebook)
+        self.logs_tab = ttk.Frame(self.notebook)
+        
+        # Add tabs to notebook
+        self.notebook.add(self.main_tab, text="Run Bot")
+        self.notebook.add(self.settings_tab, text="Settings")
+        self.notebook.add(self.logs_tab, text="Logs")
+        
+        # Set up UI for each tab
+        self.setup_main_tab()
+        self.setup_settings_tab()
+        self.setup_logs_tab()
+        
+        # Log that app is started
+        self.logger.info("Application started")
+        
+    def setup_logging(self):
+        """Set up logging for the application"""
+        # Create logs directory if needed
+        logs_dir = os.path.join(os.path.dirname(__file__), "logs")
+        if not os.path.exists(logs_dir):
+            os.makedirs(logs_dir)
+            
+        # Create log filename with timestamp
+        log_file = os.path.join(logs_dir, f"app_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+        
+        # Configure logging
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s [%(levelname)s] %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S',
+            handlers=[
+                logging.FileHandler(log_file),
+                logging.StreamHandler(sys.stdout)
+            ]
+        )
+        self.logger = logging.getLogger(__name__)
+        
+    def load_config(self):
+        """Load configuration from config file"""
+        self.config_dir = os.path.join(os.path.dirname(__file__), "config")
+        self.config_file = os.path.join(self.config_dir, "settings.json")
+        
+        # Default values
+        self.search_queries = ["AI ML", "Gen AI", "Agentic AI", "Data Engineer", "Data Analyst", "Machine Learning"]
+        self.exclude_keywords = ["Manager", "Director",".net", "SAP","java","w2 only","only w2","no c2c",
+        "only on w2","w2 profiles only","tester","f2f"]
+        self.include_keywords = ["AI", "Artificial","Inteligence","Machine","Learning", "ML", "Data", "NLP", "ETL",
+        "Natural Language Processing","analyst","scientist","senior","cloud", 
+        "aws","gcp","Azure","agentic","python","rag","llm"]
+        self.headless_mode = False
+        self.job_limit = 1500
+        
+        # Try to load from file if it exists
+        import json
+        if os.path.exists(self.config_file):
+            try:
+                with open(self.config_file, 'r') as f:
+                    config = json.load(f)
+                    self.search_queries = config.get('search_queries', self.search_queries)
+                    self.exclude_keywords = config.get('exclude_keywords', self.exclude_keywords)
+                    self.include_keywords = config.get('include_keywords', self.include_keywords)
+                    self.headless_mode = config.get('headless_mode', self.headless_mode)
+                    self.job_limit = config.get('job_application_limit', self.job_limit)
+                    self.logger.info("Configuration loaded successfully")
+            except Exception as e:
+                self.logger.error(f"Error loading configuration: {e}")
+        
+    def save_config(self):
+        """Save configuration to config file"""
+        # Ensure config directory exists
+        if not os.path.exists(self.config_dir):
+            os.makedirs(self.config_dir)
+            
+        import json
+        try:
+            config = {
+                'search_queries': [q.strip() for q in self.search_query_entry.get().split(',') if q.strip()],
+                'exclude_keywords': [k.strip() for k in self.exclude_keywords_entry.get().split(',') if k.strip()],
+                'include_keywords': [k.strip() for k in self.include_keywords_entry.get().split(',') if k.strip()],
+                'headless_mode': self.headless_var.get(),
+                'job_application_limit': self.job_limit_var.get()
+            }
+            
+            with open(self.config_file, 'w') as f:
+                json.dump(config, f, indent=4)
+                
+            # Update credentials in .env file
+            username = self.username_entry.get()
+            password = self.password_entry.get()
+            
+            if username and password:
+                update_dice_credentials(username, password)
+                
+            messagebox.showinfo("Settings Saved", "Your settings have been saved successfully.")
+            self.logger.info("Settings saved successfully")
+            
+        except Exception as e:
+            self.logger.error(f"Error saving configuration: {e}")
+            messagebox.showerror("Error", f"Could not save settings: {str(e)}")
+        
+    def calculate_time_estimate(self, jobs_count):
+        """Calculate and display estimated completion time based on job count"""
+        # Calculate based on historical data or defaults
+        # Average time per job is around 10 seconds, but can vary
+        avg_job_time = 10  # seconds
+        total_seconds = jobs_count * avg_job_time
+        
+        # Add overhead time for initialization, etc.
+        overhead_seconds = 60  # 1 minute overhead
+        
+        total_seconds += overhead_seconds
+        
+        # Calculate hours, minutes, seconds
+        hours, remainder = divmod(total_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        
+        # Create time string
+        time_str = ""
+        if hours > 0:
+            time_str += f"{int(hours)} hours "
+        if minutes > 0 or hours > 0:
+            time_str += f"{int(minutes)} minutes "
+        time_str += f"{int(seconds)} seconds"
+        
+        # Update UI with estimate
+        self.update_status(f"Estimated completion time: {time_str}")
+        return time_str
+
+    def setup_main_tab(self):
+        """Set up the main tab UI"""
+        # Job queries section
+        query_frame = ttk.LabelFrame(self.main_tab, text="Job Titles to Apply:")
+        query_frame.pack(fill="x", padx=10, pady=10)
+        
+        # Search queries field
+        self.search_query_entry = ttk.Entry(query_frame, width=70)
+        self.search_query_entry.pack(fill="x", padx=10, pady=10)
+        self.search_query_entry.insert(0, ", ".join(self.search_queries))
+        
+        # Keywords section
+        keywords_frame = ttk.LabelFrame(self.main_tab, text="Optional Keywords for Better Job Filtering:")
+        keywords_frame.pack(fill="x", padx=10, pady=10)
+        
+        # Exclude keywords
+        ttk.Label(keywords_frame, text="Exclude Keywords:").pack(anchor="w", padx=10, pady=5)
+        self.exclude_keywords_entry = ttk.Entry(keywords_frame, width=70)
+        self.exclude_keywords_entry.pack(fill="x", padx=10, pady=5)
+        self.exclude_keywords_entry.insert(0, ", ".join(self.exclude_keywords))
+        
+        # Include keywords
+        ttk.Label(keywords_frame, text="Include Keywords:").pack(anchor="w", padx=10, pady=5)
+        self.include_keywords_entry = ttk.Entry(keywords_frame, width=70)
+        self.include_keywords_entry.pack(fill="x", padx=10, pady=5)
+        self.include_keywords_entry.insert(0, ", ".join(self.include_keywords))
+        
+        # Start button with custom style
+        style = ttk.Style()
+        style.configure("Green.TButton", background="green", foreground="white", font=("Helvetica", 12, "bold"))
+        
+        self.start_button = ttk.Button(self.main_tab, text="Start Applying", command=self.start_applying, style="Green.TButton")
+        self.start_button.pack(fill="x", padx=10, pady=10)
+        
+        # Stop button
+        self.stop_button = ttk.Button(self.main_tab, text="Stop", command=self.stop_applying, state="disabled")
+        self.stop_button.pack(fill="x", padx=10, pady=5)
+        
+        # Progress section
+        progress_frame = ttk.LabelFrame(self.main_tab, text="Progress")
+        progress_frame.pack(fill="x", padx=10, pady=10)
+        
+        # Status label
+        self.status_label = ttk.Label(progress_frame, text="Ready to start.")
+        self.status_label.pack(padx=10, pady=5)
+        
+        # Progress bar
+        self.progress_bar = ttk.Progressbar(progress_frame, mode="determinate")
+        self.progress_bar.pack(fill="x", padx=10, pady=5)
+        
+        # Statistics frame
+        stats_frame = ttk.Frame(progress_frame)
+        stats_frame.pack(fill="x", padx=10, pady=5)
+        
+        # Add estimated time label
+        estimated_time_frame = ttk.Frame(progress_frame)
+        estimated_time_frame.pack(fill="x", padx=10, pady=2)
+        ttk.Label(estimated_time_frame, text="Estimated Time:").grid(row=0, column=0, padx=5, pady=2)
+        self.estimated_time_label = ttk.Label(estimated_time_frame, text="Calculating...")
+        self.estimated_time_label.grid(row=0, column=1, padx=5, pady=2)
+
+        # Total Jobs
+        ttk.Label(stats_frame, text="Total Jobs:").grid(row=0, column=0, padx=5, pady=5)
+        self.jobs_found_label = ttk.Label(stats_frame, text="0")
+        self.jobs_found_label.grid(row=0, column=1, padx=5, pady=5)
+        
+        # Jobs applied
+        ttk.Label(stats_frame, text="Jobs Applied:").grid(row=0, column=2, padx=5, pady=5)
+        self.jobs_applied_label = ttk.Label(stats_frame, text="0")
+        self.jobs_applied_label.grid(row=0, column=3, padx=5, pady=5)
+        
+        # Failed jobs
+        ttk.Label(stats_frame, text="Failed Applications:").grid(row=0, column=4, padx=5, pady=5)
+        self.jobs_failed_label = ttk.Label(stats_frame, text="0")
+        self.jobs_failed_label.grid(row=0, column=5, padx=5, pady=5)
+        
+        # Excel Files section
+        excel_frame = ttk.LabelFrame(self.main_tab, text="Excel Files")
+        excel_frame.pack(fill="x", padx=10, pady=5)
+        
+        excel_buttons_frame = ttk.Frame(excel_frame)
+        excel_buttons_frame.pack(fill="x", padx=5, pady=5)
+        
+        # Open Applied Jobs Excel
+        applied_button = ttk.Button(excel_buttons_frame, text="Open Applied Jobs Excel", command=lambda: self.open_excel_file("applied_jobs.xlsx"))
+        applied_button.grid(row=0, column=0, padx=5, pady=5)
+        
+        # Open Not Applied Jobs Excel
+        not_applied_button = ttk.Button(excel_buttons_frame, text="Open Not Applied Jobs Excel", command=lambda: self.open_excel_file("not_applied_jobs.xlsx"))
+        not_applied_button.grid(row=0, column=1, padx=5, pady=5)
+        
+        # Open Excluded Jobs Excel
+        excluded_button = ttk.Button(excel_buttons_frame, text="Open Excluded Jobs Excel", command=lambda: self.open_excel_file("excluded_jobs.xlsx"))
+        excluded_button.grid(row=0, column=2, padx=5, pady=5)
+        
+        # Log section
+        log_frame = ttk.LabelFrame(self.main_tab, text="Logs")
+        log_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Create text widget with scrollbar
+        self.log_text = scrolledtext.ScrolledText(log_frame, height=10, wrap=tk.WORD)
+        self.log_text.pack(fill="both", expand=True, padx=5, pady=5)
+        self.log_text.config(state="disabled")  # Make it read-only
+        
+        # Add a handler that redirects logs to this widget
+        self.log_handler = LogTextHandler(self.log_text)
+        self.log_handler.setLevel(logging.INFO)
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        self.log_handler.setFormatter(formatter)
+        self.logger.addHandler(self.log_handler)
+        
+    def open_excel_file(self, filename):
+        """Open an Excel file using the system default application"""
+        try:
+            if not os.path.exists(filename):
+                if filename == "excluded_jobs.xlsx":
+                    # Create the file if it doesn't exist
+                    df = pd.DataFrame(columns=["Job Title", "Job URL", "Company", "Location", "Employment Type", "Posted Date", "Exclusion Reason"])
+                    df.to_excel(filename, index=False)
+                    self.logger.info(f"Created new {filename} file")
+                else:
+                    messagebox.showinfo("File Not Found", f"The file {filename} does not exist yet.")
+                    return
+                    
+            # Open the file with the default system application
+            if sys.platform == "win32":
+                os.startfile(filename)
+            elif sys.platform == "darwin":  # macOS
+                subprocess.run(["open", filename])
+            else:  # Linux
+                subprocess.run(["xdg-open", filename])
+                
+            self.logger.info(f"Opened {filename}")
+        except Exception as e:
+            self.logger.error(f"Error opening {filename}: {e}")
+            messagebox.showerror("Error", f"Could not open {filename}: {str(e)}")
+
+    def setup_settings_tab(self):
+        """Set up the settings tab UI"""
+        # Login settings
+        login_frame = ttk.LabelFrame(self.settings_tab, text="Dice Login")
+        login_frame.pack(fill="x", padx=10, pady=10)
+        
+        # Username field
+        username_frame = ttk.Frame(login_frame)
+        username_frame.pack(fill="x", padx=10, pady=5)
+        ttk.Label(username_frame, text="Username:", width=15).pack(side="left")
+        self.username_entry = ttk.Entry(username_frame, width=50)
+        self.username_entry.pack(side="left", fill="x", expand=True)
+        
+        # Password field
+        password_frame = ttk.Frame(login_frame)
+        password_frame.pack(fill="x", padx=10, pady=5)
+        ttk.Label(password_frame, text="Password:", width=15).pack(side="left")
+        self.password_entry = ttk.Entry(password_frame, show="*", width=50)
+        self.password_entry.pack(side="left", fill="x", expand=True)
+        
+        # Test login button
+        self.test_login_button = ttk.Button(login_frame, text="Test Login", command=self.test_login)
+        self.test_login_button.pack(pady=10)
+        
+        # Application settings
+        settings_frame = ttk.LabelFrame(self.settings_tab, text="Application Settings")
+        settings_frame.pack(fill="x", padx=10, pady=10)
+        
+        # Headless mode checkbox
+        self.headless_var = tk.BooleanVar(value=self.headless_mode)
+        headless_check = ttk.Checkbutton(
+            settings_frame, 
+            text="Run in headless mode (no visible browser)",
+            variable=self.headless_var
+        )
+        headless_check.pack(anchor="w", padx=10, pady=5)
+        
+        # Job limit
+        limit_frame = ttk.Frame(settings_frame)
+        limit_frame.pack(fill="x", padx=10, pady=5)
+        ttk.Label(limit_frame, text="Maximum jobs to apply for:").pack(side="left")
+        self.job_limit_var = tk.IntVar(value=self.job_limit)
+        job_limit_spin = ttk.Spinbox(
+            limit_frame, 
+            from_=1, 
+            to=1000, 
+            width=5, 
+            textvariable=self.job_limit_var
+        )
+        job_limit_spin.pack(side="left", padx=5)
+        
+        # Save settings button
+        self.save_settings_button = ttk.Button(
+            settings_frame, 
+            text="Save Settings",
+            command=self.save_config
+        )
+        self.save_settings_button.pack(pady=10)
+        
+        # User guide
+        guide_frame = ttk.LabelFrame(self.settings_tab, text="User Guide")
+        guide_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        self.guide_text = scrolledtext.ScrolledText(guide_frame, wrap=tk.WORD)
+        self.guide_text.pack(fill="both", expand=True, padx=5, pady=5)
+        
+        # Add user guide content
+        guide_content = """
+How to Use This Application
+--------------------------
+
+1. Enter your Dice.com login credentials in the Settings tab and test them
+2. Enter job titles to search for (separated by commas)
+3. Optionally specify include/exclude keywords to filter results
+4. Click "Start Applying" to begin the automated job application process
+
+Understanding Keywords
+--------------------
+
+Include Keywords: Jobs must contain at least one of these words in the title
+Exclude Keywords: Jobs containing any of these words will be skipped
+
+Finding Results
+-------------
+
+After the process completes, you can find:
+- applied_jobs.xlsx - List of jobs successfully applied to
+- not_applied_jobs.xlsx - List of jobs that couldn't be applied to
+        """
+        self.guide_text.insert("1.0", guide_content)
+        self.guide_text.config(state="disabled")  # Make it read-only
+        
+        # Get login details from environment (if available)
+        from dotenv import load_dotenv
+        load_dotenv()
+        import os
+        username = os.getenv("DICE_USERNAME", "")
+        password = os.getenv("DICE_PASSWORD", "")
+        
+        if username:
+            self.username_entry.insert(0, username)
+        if password:
+            self.password_entry.insert(0, password)
+        
+    def setup_logs_tab(self):
+        """Set up the logs tab UI"""
+        # Create full log view
+        log_frame = ttk.Frame(self.logs_tab)
+        log_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Create text widget with scrollbar
+        self.full_log_text = scrolledtext.ScrolledText(log_frame, wrap=tk.WORD)
+        self.full_log_text.pack(fill="both", expand=True)
+        self.full_log_text.config(state="disabled")  # Make it read-only
+        
+        # Add button to load latest log file
+        ttk.Button(self.logs_tab, text="Load Latest Log File", command=self.load_log_file).pack(pady=10)
+        
+    def load_log_file(self):
+        """Load and display the latest log file"""
+        logs_dir = os.path.join(os.path.dirname(__file__), "logs")
+        if not os.path.exists(logs_dir):
+            messagebox.showinfo("No Logs", "No log files found.")
+            return
+            
+        # Find all log files
+        log_files = [os.path.join(logs_dir, f) for f in os.listdir(logs_dir) if f.startswith("app_")]
+        
+        if not log_files:
+            messagebox.showinfo("No Logs", "No log files found.")
+            return
+            
+        # Get the most recent log file
+        latest_log = max(log_files, key=os.path.getmtime)
+        
+        try:
+            # Read and display log content
+            with open(latest_log, 'r') as f:
+                content = f.read()
+                
+            # Update the text widget
+            self.full_log_text.config(state="normal")
+            self.full_log_text.delete("1.0", tk.END)
+            self.full_log_text.insert("1.0", content)
+            self.full_log_text.config(state="disabled")
+            
+            self.logger.info(f"Loaded log file: {os.path.basename(latest_log)}")
+            
+        except Exception as e:
+            self.logger.error(f"Error loading log file: {e}")
+            messagebox.showerror("Error", f"Failed to load log file: {str(e)}")
+            
+    def test_login(self):
+        """Test Dice login credentials"""
+        username = self.username_entry.get().strip()
+        password = self.password_entry.get().strip()
+        
+        if not username or not password:
+            messagebox.showwarning("Missing Credentials", "Please enter both username and password.")
+            return
+            
+        # Disable button during testing
+        self.test_login_button.config(state="disabled", text="Testing...")
+        self.root.update_idletasks()
+        
+        def test_login_thread():
+            try:
+                # Import the validation function
+                
+                success = validate_dice_credentials(username, password)
+                
+                # Update UI from the main thread
+                self.root.after(0, lambda: self.test_login_complete(success))
+                
+            except Exception as e:
+                self.logger.error(f"Login test error: {str(e)}")
+                # Update UI from the main thread
+                self.root.after(0, lambda: self.test_login_complete(False, str(e)))
+                
+        # Run the test in a separate thread
+        threading.Thread(target=test_login_thread, daemon=True).start()
+        
+    def test_login_complete(self, success, error_msg=None):
+        """Handle login test completion"""
+        # Re-enable the button
+        self.test_login_button.config(state="normal", text="Test Login")
+        
+        if success:
+            self.logger.info("Login test successful")
+            messagebox.showinfo("Login Test", "Login successful!")
+        else:
+            error = error_msg if error_msg else "Login failed. Please check your credentials."
+            self.logger.error(f"Login test failed: {error}")
+            messagebox.showerror("Login Test", error)
+            
+    def start_applying(self):
+        """Start the job application process"""
+        # Validate inputs
+        search_queries = [q.strip() for q in self.search_query_entry.get().split(",") if q.strip()]
+        if not search_queries:
+            messagebox.showwarning("Missing Input", "Please enter at least one job title to search for.")
+            return
+            
+        # Check for login credentials
+        username = self.username_entry.get().strip()
+        password = self.password_entry.get().strip()
+        if not username or not password:
+            messagebox.showwarning("Missing Credentials", "Please enter Dice login credentials in the Settings tab.")
+            self.notebook.select(1)  # Switch to settings tab
+            return
+            
+        # Get keywords
+        exclude_keywords = [k.strip() for k in self.exclude_keywords_entry.get().split(",") if k.strip()]
+        include_keywords = [k.strip() for k in self.include_keywords_entry.get().split(",") if k.strip()]
+        
+        # Update UI
+        self.running = True
+        self.start_button.config(state="disabled")
+        self.stop_button.config(state="normal")
+        self.progress_bar["value"] = 0
+        self.status_label.config(text="Starting...")
+        
+        # Reset counters
+        self.jobs_found_label.config(text="0")
+        self.jobs_applied_label.config(text="0")
+        self.jobs_failed_label.config(text="0")
+        
+        # Clear log text
+        self.log_text.config(state="normal")
+        self.log_text.delete("1.0", tk.END)
+        self.log_text.config(state="disabled")
+        
+        # Run job application process in a separate thread
+        self.job_thread = threading.Thread(
+            target=self.run_job_application,
+            args=(search_queries, include_keywords, exclude_keywords, username, password),
+            daemon=True
+        )
+        self.job_thread.start()
+        
+    def run_job_application(self, search_queries, include_keywords, exclude_keywords, username, password):
+        """Run the job application process in a background thread"""
+        try:
+            # Record start time
+            start_time = time.time()
+            self.logger.info(f"Starting job applications with queries: {search_queries}")
+            
+            # Initialize web driver
+            self.update_status("Initializing web driver...")
+            headless = self.headless_var.get()
+            driver = get_web_driver()
+            
+            # Login to Dice
+            self.update_status("Logging in to Dice...")
+            login_success = login_to_dice(driver, (username, password))
+            if not login_success:
+                self.update_status("Login failed. Please check your credentials.")
+                self.root.after(0, lambda: messagebox.showerror(
+                    "Login Failed", 
+                    "Could not log in to Dice. Please check your credentials."
+                ))
+                driver.quit()
+                self.reset_ui()
+                return
+                    
+            self.update_status("Login successful. Fetching jobs...")
+            
+            # Find jobs matching the search queries
+            all_jobs = {}
+            excluded_jobs = []  # Track excluded jobs
+            total_queries = len(search_queries)
+            
+            for i, query in enumerate(search_queries):
+                if not self.running:
+                    self.update_status("Stopped by user.")
+                    driver.quit()
+                    self.reset_ui()
+                    return
+                    
+                self.update_status(f"Searching for '{query}' ({i+1}/{total_queries})...")
+                
+                # Use the fetch_jobs_with_requests function
+                jobs, excluded = fetch_jobs_with_requests(driver, query, include_keywords, exclude_keywords)
+                
+                # Track counts before adding new jobs
+                jobs_before = len(all_jobs)
+                
+                # Add unique jobs to dictionary
+                for job in jobs:
+                    if job["Job URL"] not in all_jobs:
+                        all_jobs[job["Job URL"]] = job
+                
+                # Add excluded jobs
+                excluded_jobs.extend(excluded)
+                
+                # Calculate current count
+                current_count = len(all_jobs)
+                
+                # Update the counter after each query, capturing the current count
+                count_to_display = current_count
+                self.root.after(0, lambda c=count_to_display: self.jobs_found_label.config(text=str(c)))
+                
+                # Print debug info
+                print(f"Query '{query}': Found {len(jobs)} total jobs, added {current_count - jobs_before} unique jobs")
+                
+                # Move mouse to prevent sleeping
+                pyautogui.moveRel(1, 1, duration=0.1)
+                pyautogui.moveRel(-1, -1, duration=0.1)
+                        
+            # Make sure the final count is displayed
+            final_count = len(all_jobs)
+            self.update_status(f"Found {final_count} unique jobs matching criteria")
+            self.root.after(0, lambda c=final_count: self.jobs_found_label.config(text=str(c)))
+            
+            # Save excluded jobs to Excel
+            if excluded_jobs:
+                try:
+                    excluded_file = "excluded_jobs.xlsx"
+                    df_excluded = pd.DataFrame(excluded_jobs)
+                    df_excluded.to_excel(excluded_file, index=False)
+                    self.logger.info(f"Saved {len(excluded_jobs)} excluded jobs to {excluded_file}")
+                except Exception as e:
+                    self.logger.error(f"Error saving excluded jobs: {e}")
+            
+            # Check for already applied jobs
+            self.update_status("Checking for already applied jobs...")
+            applied_jobs_file = "applied_jobs.xlsx"
+            already_applied = set()
+            
+            if os.path.exists(applied_jobs_file):
+                try:
+                    df_applied = pd.read_excel(applied_jobs_file)
+                    already_applied = set(df_applied["Job URL"].dropna())
+                    self.update_status(f"Found {len(already_applied)} previously applied jobs to skip")
+                except Exception as e:
+                    self.logger.error(f"Error reading applied jobs file: {e}")
+            
+            # Filter out already applied jobs
+            jobs_to_apply = [job for job in all_jobs.values() if job["Job URL"] not in already_applied]
+            self.update_status(f"Applying to {len(jobs_to_apply)} jobs...")
+
+            # Update the Total Jobs count to show the jobs that will be processed
+            jobs_to_process_count = len(jobs_to_apply)
+            self.root.after(0, lambda c=jobs_to_process_count: self.jobs_found_label.config(text=str(c)))
+
+            # Apply job limit if set
+            job_limit = self.job_limit_var.get()
+            if job_limit > 0 and len(jobs_to_apply) > job_limit:
+                limited_count = job_limit
+                self.update_status(f"Limiting to {job_limit} jobs as per settings")
+                jobs_to_apply = jobs_to_apply[:job_limit]
+                self.root.after(0, lambda c=limited_count: self.jobs_found_label.config(text=str(c)))
+
+            # Calculate initial estimated time (assuming 10 jobs per minute)
+            jobs_per_minute = 10.0
+            total_jobs = len(jobs_to_apply)
+            
+            if total_jobs > 0:
+                estimated_minutes = total_jobs / jobs_per_minute
+                hours = int(estimated_minutes // 60)
+                minutes = int(estimated_minutes % 60)
+
+                # Format time string
+                initial_estimate = ""
+                if hours > 0:
+                    initial_estimate += f"{hours} hours "
+                if minutes > 0 or hours > 0:
+                    initial_estimate += f"{minutes} minutes"
+                else:
+                    initial_estimate += "less than 1 minute"
+
+                # Update both status and dedicated time label
+                self.update_status(f"Estimated completion time: {initial_estimate}")
+                self.root.after(0, lambda t=initial_estimate: self.estimated_time_label.config(text=t))
+            
+            # Start applying to jobs
+            applied_count = 0
+            failed_count = 0
+            
+            # Variables for dynamic time estimation
+            job_start_times = []
+            job_processing_times = []
+            
+            for i, job in enumerate(jobs_to_apply):
+                if not self.running:
+                    self.update_status("Stopped by user.")
+                    driver.quit()
+                    self.reset_ui()
+                    return
+                
+                # Record job start time for this specific job
+                job_start_time = time.time()
+                
+                # Update progress
+                progress = int((i / len(jobs_to_apply)) * 100) if jobs_to_apply else 0
+                self.root.after(0, lambda p=progress: self.progress_bar.config(value=p))
+                
+                # Show job details in status
+                job_title = job.get("Job Title", "Unknown")
+                self.update_status(f"Applying to: {job_title} ({i+1}/{len(jobs_to_apply)})")
+
+                # Apply to job using your existing function
+                try:
+                    result = apply_to_job_url(driver, job["Job URL"])
+                    
+                    # Record job completion time and calculate processing time for this job
+                    job_end_time = time.time()
+                    processing_time = job_end_time - job_start_time
+                    
+                    # Keep track of job times for estimation
+                    job_start_times.append(job_start_time)
+                    job_processing_times.append(processing_time)
+                    
+                    # Calculate dynamic time estimate after a few jobs
+                    if i >= 2 and len(jobs_to_apply) > i+1:
+                        # Calculate average time per job based on the last few jobs
+                        recent_times = job_processing_times[-min(10, len(job_processing_times)):]
+                        avg_time_per_job = sum(recent_times) / len(recent_times)
+                        
+                        # Calculate remaining time
+                        remaining_jobs = len(jobs_to_apply) - (i + 1)
+                        remaining_seconds = avg_time_per_job * remaining_jobs
+                        
+                        # Format remaining time string
+                        remaining_hours = int(remaining_seconds // 3600)
+                        remaining_minutes = int((remaining_seconds % 3600) // 60)
+                        remaining_seconds = int(remaining_seconds % 60)
+                        
+                        time_remaining = ""
+                        if remaining_hours > 0:
+                            time_remaining += f"{remaining_hours} hours "
+                        if remaining_minutes > 0 or remaining_hours > 0:
+                            time_remaining += f"{remaining_minutes} minutes "
+                        time_remaining += f"{remaining_seconds} seconds"
+                        
+                        # Update the estimated time label
+                        self.root.after(0, lambda t=time_remaining: self.estimated_time_label.config(text=t))
+                    
+                    if result:
+                        applied_count += 1
+                        # Update applied count
+                        count_to_display = applied_count
+                        self.root.after(0, lambda c=count_to_display: 
+                            self.jobs_applied_label.config(text=str(c)))
+                        
+                        # Save to applied jobs Excel file
+                        try:
+                            job["Applied"] = True
+                            if os.path.exists(applied_jobs_file):
+                                df_existing = pd.read_excel(applied_jobs_file)
+                            else:
+                                df_existing = pd.DataFrame(columns=[
+                                    "Job Title", "Job URL", "Company", "Location", 
+                                    "Employment Type", "Posted Date", "Applied"
+                                ])
+                            
+                            df_new = pd.DataFrame([job])
+                            df_combined = pd.concat([df_existing, df_new], ignore_index=True)
+                            df_combined.to_excel(applied_jobs_file, index=False)
+                        except Exception as e:
+                            self.logger.error(f"Error updating Excel file: {e}")
+                    else:
+                        failed_count += 1
+                        # Update failed count
+                        count_to_display = failed_count
+                        self.root.after(0, lambda c=count_to_display: 
+                            self.jobs_failed_label.config(text=str(c)))
+                        
+                        # Save to not applied jobs Excel file
+                        not_applied_file = "not_applied_jobs.xlsx"
+                        try:
+                            if os.path.exists(not_applied_file):
+                                df_existing = pd.read_excel(not_applied_file)
+                            else:
+                                df_existing = pd.DataFrame(columns=[
+                                    "Job Title", "Job URL", "Company", "Location", 
+                                    "Employment Type", "Posted Date", "Applied"
+                                ])
+                            
+                            job["Applied"] = False
+                            df_new = pd.DataFrame([job])
+                            df_combined = pd.concat([df_existing, df_new], ignore_index=True)
+                            df_combined.to_excel(not_applied_file, index=False)
+                        except Exception as e:
+                            self.logger.error(f"Error updating not_applied Excel file: {e}")
+                    
+                except Exception as e:
+                    self.logger.error(f"Error applying to {job_title}: {e}")
+                    failed_count += 1
+                    # Update failed count
+                    count_to_display = failed_count
+                    self.root.after(0, lambda c=count_to_display: 
+                        self.jobs_failed_label.config(text=str(c)))
+                
+                # Move mouse to prevent sleeping
+                pyautogui.moveRel(1, 1, duration=0.1)
+                pyautogui.moveRel(-1, -1, duration=0.1)
+            
+            # Compute execution time
+            end_time = time.time()
+            execution_time = end_time - start_time
+            hours, remainder = divmod(execution_time, 3600)
+            minutes, seconds = divmod(remainder, 60)
+            
+            time_str = f"{int(hours)}h {int(minutes)}m {seconds:.2f}s"
+            self.update_status(f"Completed! Applied: {applied_count}, Failed: {failed_count}, Time: {time_str}")
+            
+            # Final progress update
+            self.root.after(0, lambda: self.progress_bar.config(value=100))
+            # Clear estimated time as we're done
+            self.root.after(0, lambda: self.estimated_time_label.config(text="Completed"))
+            
+            # Save job data to JSON file
+            import json
+            try:
+                job_data = {
+                    "Total Jobs Found": len(all_jobs),
+                    "Jobs Applied": applied_count,
+                    "Jobs Failed": failed_count,
+                    "Execution Time": time_str,
+                    "Date": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+                with open("job_application_summary.json", "w") as f:
+                    json.dump(job_data, f, indent=4)
+            except Exception as e:
+                self.logger.error(f"Error saving job data: {e}")
+                
+            # Show completion message
+            self.root.after(0, lambda: messagebox.showinfo(
+                "Process Complete", 
+                f"Application process completed!\n\n"
+                f"Applied to {applied_count} jobs\n"
+                f"Failed for {failed_count} jobs\n\n"
+                f"Total execution time: {time_str}"
+            ))
+            
+            # Clean up
+            driver.quit()
+                
+        except Exception as e:
+            self.logger.error(f"Error in job application process: {e}")
+            self.update_status(f"Error: {str(e)}")
+            self.root.after(0, lambda: messagebox.showerror(
+                "Error", 
+                f"An error occurred: {str(e)}"
+            ))
+        finally:
+            # Reset UI
+            self.reset_ui()
+
+
+            
+    def stop_applying(self):
+        """Stop the job application process"""
+        if not self.running:
+            return
+            
+        self.running = False
+        self.stop_button.config(state="disabled")
+        self.status_label.config(text="Stopping... Please wait.")
+        self.logger.info("User requested to stop the application process")
+        
+    def reset_ui(self):
+        """Reset UI after job completion or stop"""
+        self.running = False
+        self.start_button.config(state="normal")
+        self.stop_button.config(state="normal", text="Stop")
+        
+    def update_status(self, message):
+        """Update status message and log it"""
+        self.logger.info(message)
+        self.root.after(0, lambda msg=message: self.status_label.config(text=msg))
+        
+
+class LogTextHandler(logging.Handler):
+    """Custom log handler that redirects logs to a tk Text widget"""
+    
+    def __init__(self, text_widget):
+        logging.Handler.__init__(self)
+        self.text_widget = text_widget
+        
+    def emit(self, record):
+        msg = self.format(record)
+        
+        def append_log():
+            self.text_widget.config(state="normal")
+            self.text_widget.insert("end", msg + "\n")
+            self.text_widget.see("end")  # Scroll to the bottom
+            self.text_widget.config(state="disabled")
+            
+        # Schedule the update in the main thread
+        self.text_widget.after(0, append_log)
+        
+
+def main():
+    root = tk.Tk()
+    app = DiceAutoBotApp(root)
+    root.protocol("WM_DELETE_WINDOW", root.quit)  # Ensure clean exit
+    root.mainloop()
+
+if __name__ == "__main__":
+    main()
+
+
+
+======= Contents of /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/.env =======
+
+DICE_USERNAME='yuva.avuthu@gmail.com'
+DICE_PASSWORD='Yuvi@0520'
+WEB_BROWSER_PATH='/Applications/Brave Browser.app/Contents/MacOS/Brave Browser'
+
+
+[Skipped] Binary or non-UTF-8 file: /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/excluded_jobs.xlsx
+
+
+======= Contents of /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/output.txt =======
+
+
+[Skipped] Binary or non-UTF-8 file: /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/.DS_Store
+
+
+======= Contents of /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/requirements.txt =======
+
+selenium==4.29.0
+python-dotenv==1.0.1
+pandas==2.2.3
+openpyxl==3.1.5
+webdriver_manager==4.0.2
+pyautogui==0.9.54
+requests==2.32.3
+beautifulsoup4==4.13.3
+
+
+
+======= Contents of /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/job_application_summary.json =======
+
+{
+    "Total Jobs Found": 437,
+    "Jobs Applied": 93,
+    "Jobs Failed": 25,
+    "Execution Time": "0h 16m 43.97s",
+    "Date": "2025-04-15 10:47:28"
+}
+
+[Skipped] Binary or non-UTF-8 file: /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/not_applied_jobs.xlsx
+
+
+======= Contents of /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/__init__.py =======
+
+
+
+
+======= Contents of /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/app_tkinter.py =======
+
+# dice_auto_apply/app_tkinter.py
+
+import os
+import sys
+import tkinter as tk
+from tkinter import ttk, messagebox, scrolledtext
+import threading
+import pandas as pd
+from datetime import datetime
+import time
+import logging
+import pyautogui
+import subprocess
+
+# Try both absolute and relative imports for compatibility
+try:
+    from core.browser_detector import get_browser_path
+    from core.dice_login import login_to_dice, update_dice_credentials, validate_dice_credentials
+    from core.main_script import get_web_driver, fetch_jobs_with_requests, apply_to_job_url
+except ImportError:
+    try:
+        from core.browser_detector import get_browser_path
+        from core.dice_login import login_to_dice, update_dice_credentials, validate_dice_credentials
+        from core.main_script import get_web_driver, fetch_jobs_with_requests, apply_to_job_url
+    except ImportError:
+        from core.browser_detector import get_browser_path
+        from core.dice_login import login_to_dice, update_dice_credentials, validate_dice_credentials
+        from core.main_script import get_web_driver, fetch_jobs_with_requests, apply_to_job_url
+
+
+
+def fix_imports():
+    """Fix imports for both development and packaged environments"""
+    import os
+    import sys
+    
+    # Add the parent directory to the path if not already there
+    parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if parent_dir not in sys.path:
+        sys.path.insert(0, parent_dir)
+
+# Call this at the beginning of your script
+fix_imports()
+
+class DiceAutoBotApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Dice Auto Apply Bot")
+        self.root.geometry("900x700")
+        
+        # Set app icon if available
+        try:
+            icon_path = os.path.join(os.path.dirname(__file__), "resources", "app_icon.png")
+            if os.path.exists(icon_path):
+                # For Windows
+                if sys.platform == 'win32':
+                    self.root.iconbitmap(icon_path)
+                # For macOS and others that support .png icons
+                else:
+                    img = tk.PhotoImage(file=icon_path)
+                    self.root.iconphoto(True, img)
+        except Exception as e:
+            pass
+        
+        # Disable PyAutoGUI failsafe
+        pyautogui.FAILSAFE = False
+        
+        # Configure logging
+        self.setup_logging()
+        
+        # Initialize variables
+        self.driver = None
+        self.job_thread = None
+        self.running = False
+        
+        # Load configuration if exists
+        self.load_config()
+        
+        # Create the tabs
+        self.notebook = ttk.Notebook(root)
+        self.notebook.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Create tab frames
+        self.main_tab = ttk.Frame(self.notebook)
+        self.settings_tab = ttk.Frame(self.notebook)
+        self.logs_tab = ttk.Frame(self.notebook)
+        
+        # Add tabs to notebook
+        self.notebook.add(self.main_tab, text="Run Bot")
+        self.notebook.add(self.settings_tab, text="Settings")
+        self.notebook.add(self.logs_tab, text="Logs")
+        
+        # Set up UI for each tab
+        self.setup_main_tab()
+        self.setup_settings_tab()
+        self.setup_logs_tab()
+        
+        # Log that app is started
+        self.logger.info("Application started")
+        
+    def setup_logging(self):
+        """Set up logging for the application"""
+        # Create logs directory if needed
+        logs_dir = os.path.join(os.path.dirname(__file__), "logs")
+        if not os.path.exists(logs_dir):
+            os.makedirs(logs_dir)
+            
+        # Create log filename with timestamp
+        log_file = os.path.join(logs_dir, f"app_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+        
+        # Configure logging
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s [%(levelname)s] %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S',
+            handlers=[
+                logging.FileHandler(log_file),
+                logging.StreamHandler(sys.stdout)
+            ]
+        )
+        self.logger = logging.getLogger(__name__)
+        
+    def load_config(self):
+        """Load configuration from config file"""
+        self.config_dir = os.path.join(os.path.dirname(__file__), "config")
+        self.config_file = os.path.join(self.config_dir, "settings.json")
+        
+        # Default values
+        self.search_queries = ["AI ML", "Gen AI", "Agentic AI", "Data Engineer", "Data Analyst", "Machine Learning"]
+        self.exclude_keywords = ["Manager", "Director",".net", "SAP","java","w2 only","only w2","no c2c",
+        "only on w2","w2 profiles only","tester","f2f"]
+        self.include_keywords = ["AI", "Artificial","Inteligence","Machine","Learning", "ML", "Data", "NLP", "ETL",
+        "Natural Language Processing","analyst","scientist","senior","cloud", 
+        "aws","gcp","Azure","agentic","python","rag","llm"]
+        self.headless_mode = False
+        self.job_limit = 1500
+        
+        # Try to load from file if it exists
+        import json
+        if os.path.exists(self.config_file):
+            try:
+                with open(self.config_file, 'r') as f:
+                    config = json.load(f)
+                    self.search_queries = config.get('search_queries', self.search_queries)
+                    self.exclude_keywords = config.get('exclude_keywords', self.exclude_keywords)
+                    self.include_keywords = config.get('include_keywords', self.include_keywords)
+                    self.headless_mode = config.get('headless_mode', self.headless_mode)
+                    self.job_limit = config.get('job_application_limit', self.job_limit)
+                    self.logger.info("Configuration loaded successfully")
+            except Exception as e:
+                self.logger.error(f"Error loading configuration: {e}")
+        
+    def save_config(self):
+        """Save configuration to config file"""
+        # Ensure config directory exists
+        if not os.path.exists(self.config_dir):
+            os.makedirs(self.config_dir)
+            
+        import json
+        try:
+            config = {
+                'search_queries': [q.strip() for q in self.search_query_entry.get().split(',') if q.strip()],
+                'exclude_keywords': [k.strip() for k in self.exclude_keywords_entry.get().split(',') if k.strip()],
+                'include_keywords': [k.strip() for k in self.include_keywords_entry.get().split(',') if k.strip()],
+                'headless_mode': self.headless_var.get(),
+                'job_application_limit': self.job_limit_var.get()
+            }
+            
+            with open(self.config_file, 'w') as f:
+                json.dump(config, f, indent=4)
+                
+            # Update credentials in .env file
+            username = self.username_entry.get()
+            password = self.password_entry.get()
+            
+            if username and password:
+                update_dice_credentials(username, password)
+                
+            messagebox.showinfo("Settings Saved", "Your settings have been saved successfully.")
+            self.logger.info("Settings saved successfully")
+            
+        except Exception as e:
+            self.logger.error(f"Error saving configuration: {e}")
+            messagebox.showerror("Error", f"Could not save settings: {str(e)}")
+        
+    def calculate_time_estimate(self, jobs_count):
+        """Calculate and display estimated completion time based on job count"""
+        # Calculate based on historical data or defaults
+        # Average time per job is around 10 seconds, but can vary
+        avg_job_time = 10  # seconds
+        total_seconds = jobs_count * avg_job_time
+        
+        # Add overhead time for initialization, etc.
+        overhead_seconds = 60  # 1 minute overhead
+        
+        total_seconds += overhead_seconds
+        
+        # Calculate hours, minutes, seconds
+        hours, remainder = divmod(total_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        
+        # Create time string
+        time_str = ""
+        if hours > 0:
+            time_str += f"{int(hours)} hours "
+        if minutes > 0 or hours > 0:
+            time_str += f"{int(minutes)} minutes "
+        time_str += f"{int(seconds)} seconds"
+        
+        # Update UI with estimate
+        self.update_status(f"Estimated completion time: {time_str}")
+        return time_str
+
+    def setup_main_tab(self):
+        """Set up the main tab UI"""
+        # Job queries section
+        query_frame = ttk.LabelFrame(self.main_tab, text="Job Titles to Apply:")
+        query_frame.pack(fill="x", padx=10, pady=10)
+        
+        # Search queries field
+        self.search_query_entry = ttk.Entry(query_frame, width=70)
+        self.search_query_entry.pack(fill="x", padx=10, pady=10)
+        self.search_query_entry.insert(0, ", ".join(self.search_queries))
+        
+        # Keywords section
+        keywords_frame = ttk.LabelFrame(self.main_tab, text="Optional Keywords for Better Job Filtering:")
+        keywords_frame.pack(fill="x", padx=10, pady=10)
+        
+        # Exclude keywords
+        ttk.Label(keywords_frame, text="Exclude Keywords:").pack(anchor="w", padx=10, pady=5)
+        self.exclude_keywords_entry = ttk.Entry(keywords_frame, width=70)
+        self.exclude_keywords_entry.pack(fill="x", padx=10, pady=5)
+        self.exclude_keywords_entry.insert(0, ", ".join(self.exclude_keywords))
+        
+        # Include keywords
+        ttk.Label(keywords_frame, text="Include Keywords:").pack(anchor="w", padx=10, pady=5)
+        self.include_keywords_entry = ttk.Entry(keywords_frame, width=70)
+        self.include_keywords_entry.pack(fill="x", padx=10, pady=5)
+        self.include_keywords_entry.insert(0, ", ".join(self.include_keywords))
+        
+        # Start button with custom style
+        style = ttk.Style()
+        style.configure("Green.TButton", background="green", foreground="white", font=("Helvetica", 12, "bold"))
+        
+        self.start_button = ttk.Button(self.main_tab, text="Start Applying", command=self.start_applying, style="Green.TButton")
+        self.start_button.pack(fill="x", padx=10, pady=10)
+        
+        # Stop button
+        self.stop_button = ttk.Button(self.main_tab, text="Stop", command=self.stop_applying, state="disabled")
+        self.stop_button.pack(fill="x", padx=10, pady=5)
+        
+        # Progress section
+        progress_frame = ttk.LabelFrame(self.main_tab, text="Progress")
+        progress_frame.pack(fill="x", padx=10, pady=10)
+        
+        # Status label
+        self.status_label = ttk.Label(progress_frame, text="Ready to start.")
+        self.status_label.pack(padx=10, pady=5)
+        
+        # Progress bar
+        self.progress_bar = ttk.Progressbar(progress_frame, mode="determinate")
+        self.progress_bar.pack(fill="x", padx=10, pady=5)
+        
+        # Statistics frame
+        stats_frame = ttk.Frame(progress_frame)
+        stats_frame.pack(fill="x", padx=10, pady=5)
+        
+        # Add estimated time label
+        estimated_time_frame = ttk.Frame(progress_frame)
+        estimated_time_frame.pack(fill="x", padx=10, pady=2)
+        ttk.Label(estimated_time_frame, text="Estimated Time:").grid(row=0, column=0, padx=5, pady=2)
+        self.estimated_time_label = ttk.Label(estimated_time_frame, text="Calculating...")
+        self.estimated_time_label.grid(row=0, column=1, padx=5, pady=2)
+
+        # Total Jobs
+        ttk.Label(stats_frame, text="Total Jobs:").grid(row=0, column=0, padx=5, pady=5)
+        self.jobs_found_label = ttk.Label(stats_frame, text="0")
+        self.jobs_found_label.grid(row=0, column=1, padx=5, pady=5)
+        
+        # Jobs applied
+        ttk.Label(stats_frame, text="Jobs Applied:").grid(row=0, column=2, padx=5, pady=5)
+        self.jobs_applied_label = ttk.Label(stats_frame, text="0")
+        self.jobs_applied_label.grid(row=0, column=3, padx=5, pady=5)
+        
+        # Failed jobs
+        ttk.Label(stats_frame, text="Failed Applications:").grid(row=0, column=4, padx=5, pady=5)
+        self.jobs_failed_label = ttk.Label(stats_frame, text="0")
+        self.jobs_failed_label.grid(row=0, column=5, padx=5, pady=5)
+        
+        # Excel Files section
+        excel_frame = ttk.LabelFrame(self.main_tab, text="Excel Files")
+        excel_frame.pack(fill="x", padx=10, pady=5)
+        
+        excel_buttons_frame = ttk.Frame(excel_frame)
+        excel_buttons_frame.pack(fill="x", padx=5, pady=5)
+        
+        # Open Applied Jobs Excel
+        applied_button = ttk.Button(excel_buttons_frame, text="Open Applied Jobs Excel", command=lambda: self.open_excel_file("applied_jobs.xlsx"))
+        applied_button.grid(row=0, column=0, padx=5, pady=5)
+        
+        # Open Not Applied Jobs Excel
+        not_applied_button = ttk.Button(excel_buttons_frame, text="Open Not Applied Jobs Excel", command=lambda: self.open_excel_file("not_applied_jobs.xlsx"))
+        not_applied_button.grid(row=0, column=1, padx=5, pady=5)
+        
+        # Open Excluded Jobs Excel
+        excluded_button = ttk.Button(excel_buttons_frame, text="Open Excluded Jobs Excel", command=lambda: self.open_excel_file("excluded_jobs.xlsx"))
+        excluded_button.grid(row=0, column=2, padx=5, pady=5)
+        
+        # Log section
+        log_frame = ttk.LabelFrame(self.main_tab, text="Logs")
+        log_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Create text widget with scrollbar
+        self.log_text = scrolledtext.ScrolledText(log_frame, height=10, wrap=tk.WORD)
+        self.log_text.pack(fill="both", expand=True, padx=5, pady=5)
+        self.log_text.config(state="disabled")  # Make it read-only
+        
+        # Add a handler that redirects logs to this widget
+        self.log_handler = LogTextHandler(self.log_text)
+        self.log_handler.setLevel(logging.INFO)
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        self.log_handler.setFormatter(formatter)
+        self.logger.addHandler(self.log_handler)
+        
+    def open_excel_file(self, filename):
+        """Open an Excel file using the system default application"""
+        try:
+            if not os.path.exists(filename):
+                if filename == "excluded_jobs.xlsx":
+                    # Create the file if it doesn't exist
+                    df = pd.DataFrame(columns=["Job Title", "Job URL", "Company", "Location", "Employment Type", "Posted Date", "Exclusion Reason"])
+                    df.to_excel(filename, index=False)
+                    self.logger.info(f"Created new {filename} file")
+                else:
+                    messagebox.showinfo("File Not Found", f"The file {filename} does not exist yet.")
+                    return
+                    
+            # Open the file with the default system application
+            if sys.platform == "win32":
+                os.startfile(filename)
+            elif sys.platform == "darwin":  # macOS
+                subprocess.run(["open", filename])
+            else:  # Linux
+                subprocess.run(["xdg-open", filename])
+                
+            self.logger.info(f"Opened {filename}")
+        except Exception as e:
+            self.logger.error(f"Error opening {filename}: {e}")
+            messagebox.showerror("Error", f"Could not open {filename}: {str(e)}")
+
+    def setup_settings_tab(self):
+        """Set up the settings tab UI"""
+        # Login settings
+        login_frame = ttk.LabelFrame(self.settings_tab, text="Dice Login")
+        login_frame.pack(fill="x", padx=10, pady=10)
+        
+        # Username field
+        username_frame = ttk.Frame(login_frame)
+        username_frame.pack(fill="x", padx=10, pady=5)
+        ttk.Label(username_frame, text="Username:", width=15).pack(side="left")
+        self.username_entry = ttk.Entry(username_frame, width=50)
+        self.username_entry.pack(side="left", fill="x", expand=True)
+        
+        # Password field
+        password_frame = ttk.Frame(login_frame)
+        password_frame.pack(fill="x", padx=10, pady=5)
+        ttk.Label(password_frame, text="Password:", width=15).pack(side="left")
+        self.password_entry = ttk.Entry(password_frame, show="*", width=50)
+        self.password_entry.pack(side="left", fill="x", expand=True)
+        
+        # Test login button
+        self.test_login_button = ttk.Button(login_frame, text="Test Login", command=self.test_login)
+        self.test_login_button.pack(pady=10)
+        
+        # Application settings
+        settings_frame = ttk.LabelFrame(self.settings_tab, text="Application Settings")
+        settings_frame.pack(fill="x", padx=10, pady=10)
+        
+        # Headless mode checkbox
+        self.headless_var = tk.BooleanVar(value=self.headless_mode)
+        headless_check = ttk.Checkbutton(
+            settings_frame, 
+            text="Run in headless mode (no visible browser)",
+            variable=self.headless_var
+        )
+        headless_check.pack(anchor="w", padx=10, pady=5)
+        
+        # Job limit
+        limit_frame = ttk.Frame(settings_frame)
+        limit_frame.pack(fill="x", padx=10, pady=5)
+        ttk.Label(limit_frame, text="Maximum jobs to apply for:").pack(side="left")
+        self.job_limit_var = tk.IntVar(value=self.job_limit)
+        job_limit_spin = ttk.Spinbox(
+            limit_frame, 
+            from_=1, 
+            to=1000, 
+            width=5, 
+            textvariable=self.job_limit_var
+        )
+        job_limit_spin.pack(side="left", padx=5)
+        
+        # Save settings button
+        self.save_settings_button = ttk.Button(
+            settings_frame, 
+            text="Save Settings",
+            command=self.save_config
+        )
+        self.save_settings_button.pack(pady=10)
+        
+        # User guide
+        guide_frame = ttk.LabelFrame(self.settings_tab, text="User Guide")
+        guide_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        self.guide_text = scrolledtext.ScrolledText(guide_frame, wrap=tk.WORD)
+        self.guide_text.pack(fill="both", expand=True, padx=5, pady=5)
+        
+        # Add user guide content
+        guide_content = """
+How to Use This Application
+--------------------------
+
+1. Enter your Dice.com login credentials in the Settings tab and test them
+2. Enter job titles to search for (separated by commas)
+3. Optionally specify include/exclude keywords to filter results
+4. Click "Start Applying" to begin the automated job application process
+
+Understanding Keywords
+--------------------
+
+Include Keywords: Jobs must contain at least one of these words in the title
+Exclude Keywords: Jobs containing any of these words will be skipped
+
+Finding Results
+-------------
+
+After the process completes, you can find:
+- applied_jobs.xlsx - List of jobs successfully applied to
+- not_applied_jobs.xlsx - List of jobs that couldn't be applied to
+        """
+        self.guide_text.insert("1.0", guide_content)
+        self.guide_text.config(state="disabled")  # Make it read-only
+        
+        # Get login details from environment (if available)
+        from dotenv import load_dotenv
+        load_dotenv()
+        import os
+        username = os.getenv("DICE_USERNAME", "")
+        password = os.getenv("DICE_PASSWORD", "")
+        
+        if username:
+            self.username_entry.insert(0, username)
+        if password:
+            self.password_entry.insert(0, password)
+        
+    def setup_logs_tab(self):
+        """Set up the logs tab UI"""
+        # Create full log view
+        log_frame = ttk.Frame(self.logs_tab)
+        log_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Create text widget with scrollbar
+        self.full_log_text = scrolledtext.ScrolledText(log_frame, wrap=tk.WORD)
+        self.full_log_text.pack(fill="both", expand=True)
+        self.full_log_text.config(state="disabled")  # Make it read-only
+        
+        # Add button to load latest log file
+        ttk.Button(self.logs_tab, text="Load Latest Log File", command=self.load_log_file).pack(pady=10)
+        
+    def load_log_file(self):
+        """Load and display the latest log file"""
+        logs_dir = os.path.join(os.path.dirname(__file__), "logs")
+        if not os.path.exists(logs_dir):
+            messagebox.showinfo("No Logs", "No log files found.")
+            return
+            
+        # Find all log files
+        log_files = [os.path.join(logs_dir, f) for f in os.listdir(logs_dir) if f.startswith("app_")]
+        
+        if not log_files:
+            messagebox.showinfo("No Logs", "No log files found.")
+            return
+            
+        # Get the most recent log file
+        latest_log = max(log_files, key=os.path.getmtime)
+        
+        try:
+            # Read and display log content
+            with open(latest_log, 'r') as f:
+                content = f.read()
+                
+            # Update the text widget
+            self.full_log_text.config(state="normal")
+            self.full_log_text.delete("1.0", tk.END)
+            self.full_log_text.insert("1.0", content)
+            self.full_log_text.config(state="disabled")
+            
+            self.logger.info(f"Loaded log file: {os.path.basename(latest_log)}")
+            
+        except Exception as e:
+            self.logger.error(f"Error loading log file: {e}")
+            messagebox.showerror("Error", f"Failed to load log file: {str(e)}")
+            
+    def test_login(self):
+        """Test Dice login credentials"""
+        username = self.username_entry.get().strip()
+        password = self.password_entry.get().strip()
+        
+        if not username or not password:
+            messagebox.showwarning("Missing Credentials", "Please enter both username and password.")
+            return
+            
+        # Disable button during testing
+        self.test_login_button.config(state="disabled", text="Testing...")
+        self.root.update_idletasks()
+        
+        def test_login_thread():
+            try:
+                # Import the validation function
+                
+                success = validate_dice_credentials(username, password)
+                
+                # Update UI from the main thread
+                self.root.after(0, lambda: self.test_login_complete(success))
+                
+            except Exception as e:
+                self.logger.error(f"Login test error: {str(e)}")
+                # Update UI from the main thread
+                self.root.after(0, lambda: self.test_login_complete(False, str(e)))
+                
+        # Run the test in a separate thread
+        threading.Thread(target=test_login_thread, daemon=True).start()
+        
+    def test_login_complete(self, success, error_msg=None):
+        """Handle login test completion"""
+        # Re-enable the button
+        self.test_login_button.config(state="normal", text="Test Login")
+        
+        if success:
+            self.logger.info("Login test successful")
+            messagebox.showinfo("Login Test", "Login successful!")
+        else:
+            error = error_msg if error_msg else "Login failed. Please check your credentials."
+            self.logger.error(f"Login test failed: {error}")
+            messagebox.showerror("Login Test", error)
+            
+    def start_applying(self):
+        """Start the job application process"""
+        # Validate inputs
+        search_queries = [q.strip() for q in self.search_query_entry.get().split(",") if q.strip()]
+        if not search_queries:
+            messagebox.showwarning("Missing Input", "Please enter at least one job title to search for.")
+            return
+            
+        # Check for login credentials
+        username = self.username_entry.get().strip()
+        password = self.password_entry.get().strip()
+        if not username or not password:
+            messagebox.showwarning("Missing Credentials", "Please enter Dice login credentials in the Settings tab.")
+            self.notebook.select(1)  # Switch to settings tab
+            return
+            
+        # Get keywords
+        exclude_keywords = [k.strip() for k in self.exclude_keywords_entry.get().split(",") if k.strip()]
+        include_keywords = [k.strip() for k in self.include_keywords_entry.get().split(",") if k.strip()]
+        
+        # Update UI
+        self.running = True
+        self.start_button.config(state="disabled")
+        self.stop_button.config(state="normal")
+        self.progress_bar["value"] = 0
+        self.status_label.config(text="Starting...")
+        
+        # Reset counters
+        self.jobs_found_label.config(text="0")
+        self.jobs_applied_label.config(text="0")
+        self.jobs_failed_label.config(text="0")
+        
+        # Clear log text
+        self.log_text.config(state="normal")
+        self.log_text.delete("1.0", tk.END)
+        self.log_text.config(state="disabled")
+        
+        # Run job application process in a separate thread
+        self.job_thread = threading.Thread(
+            target=self.run_job_application,
+            args=(search_queries, include_keywords, exclude_keywords, username, password),
+            daemon=True
+        )
+        self.job_thread.start()
+        
+    def run_job_application(self, search_queries, include_keywords, exclude_keywords, username, password):
+        """Run the job application process in a background thread"""
+        try:
+            # Record start time
+            start_time = time.time()
+            self.logger.info(f"Starting job applications with queries: {search_queries}")
+            
+            # Initialize web driver
+            self.update_status("Initializing web driver...")
+            headless = self.headless_var.get()
+            driver = get_web_driver()
+            
+            # Login to Dice
+            self.update_status("Logging in to Dice...")
+            login_success = login_to_dice(driver, (username, password))
+            if not login_success:
+                self.update_status("Login failed. Please check your credentials.")
+                self.root.after(0, lambda: messagebox.showerror(
+                    "Login Failed", 
+                    "Could not log in to Dice. Please check your credentials."
+                ))
+                driver.quit()
+                self.reset_ui()
+                return
+                    
+            self.update_status("Login successful. Fetching jobs...")
+            
+            # Find jobs matching the search queries
+            all_jobs = {}
+            excluded_jobs = []  # Track excluded jobs
+            total_queries = len(search_queries)
+            
+            for i, query in enumerate(search_queries):
+                if not self.running:
+                    self.update_status("Stopped by user.")
+                    driver.quit()
+                    self.reset_ui()
+                    return
+                    
+                self.update_status(f"Searching for '{query}' ({i+1}/{total_queries})...")
+                
+                # Use the fetch_jobs_with_requests function
+                jobs, excluded = fetch_jobs_with_requests(driver, query, include_keywords, exclude_keywords)
+                
+                # Track counts before adding new jobs
+                jobs_before = len(all_jobs)
+                
+                # Add unique jobs to dictionary
+                for job in jobs:
+                    if job["Job URL"] not in all_jobs:
+                        all_jobs[job["Job URL"]] = job
+                
+                # Add excluded jobs
+                excluded_jobs.extend(excluded)
+                
+                # Calculate current count
+                current_count = len(all_jobs)
+                
+                # Update the counter after each query, capturing the current count
+                count_to_display = current_count
+                self.root.after(0, lambda c=count_to_display: self.jobs_found_label.config(text=str(c)))
+                
+                # Print debug info
+                print(f"Query '{query}': Found {len(jobs)} total jobs, added {current_count - jobs_before} unique jobs")
+                
+                # Move mouse to prevent sleeping
+                pyautogui.moveRel(1, 1, duration=0.1)
+                pyautogui.moveRel(-1, -1, duration=0.1)
+                        
+            # Make sure the final count is displayed
+            final_count = len(all_jobs)
+            self.update_status(f"Found {final_count} unique jobs matching criteria")
+            self.root.after(0, lambda c=final_count: self.jobs_found_label.config(text=str(c)))
+            
+            # Save excluded jobs to Excel
+            if excluded_jobs:
+                try:
+                    excluded_file = "excluded_jobs.xlsx"
+                    df_excluded = pd.DataFrame(excluded_jobs)
+                    df_excluded.to_excel(excluded_file, index=False)
+                    self.logger.info(f"Saved {len(excluded_jobs)} excluded jobs to {excluded_file}")
+                except Exception as e:
+                    self.logger.error(f"Error saving excluded jobs: {e}")
+            
+            # Check for already applied jobs
+            self.update_status("Checking for already applied jobs...")
+            applied_jobs_file = "applied_jobs.xlsx"
+            already_applied = set()
+            
+            if os.path.exists(applied_jobs_file):
+                try:
+                    df_applied = pd.read_excel(applied_jobs_file)
+                    already_applied = set(df_applied["Job URL"].dropna())
+                    self.update_status(f"Found {len(already_applied)} previously applied jobs to skip")
+                except Exception as e:
+                    self.logger.error(f"Error reading applied jobs file: {e}")
+            
+            # Filter out already applied jobs
+            jobs_to_apply = [job for job in all_jobs.values() if job["Job URL"] not in already_applied]
+            self.update_status(f"Applying to {len(jobs_to_apply)} jobs...")
+
+            # Update the Total Jobs count to show the jobs that will be processed
+            jobs_to_process_count = len(jobs_to_apply)
+            self.root.after(0, lambda c=jobs_to_process_count: self.jobs_found_label.config(text=str(c)))
+
+            # Apply job limit if set
+            job_limit = self.job_limit_var.get()
+            if job_limit > 0 and len(jobs_to_apply) > job_limit:
+                limited_count = job_limit
+                self.update_status(f"Limiting to {job_limit} jobs as per settings")
+                jobs_to_apply = jobs_to_apply[:job_limit]
+                self.root.after(0, lambda c=limited_count: self.jobs_found_label.config(text=str(c)))
+
+            # Calculate initial estimated time (assuming 10 jobs per minute)
+            jobs_per_minute = 10.0
+            total_jobs = len(jobs_to_apply)
+            
+            if total_jobs > 0:
+                estimated_minutes = total_jobs / jobs_per_minute
+                hours = int(estimated_minutes // 60)
+                minutes = int(estimated_minutes % 60)
+
+                # Format time string
+                initial_estimate = ""
+                if hours > 0:
+                    initial_estimate += f"{hours} hours "
+                if minutes > 0 or hours > 0:
+                    initial_estimate += f"{minutes} minutes"
+                else:
+                    initial_estimate += "less than 1 minute"
+
+                # Update both status and dedicated time label
+                self.update_status(f"Estimated completion time: {initial_estimate}")
+                self.root.after(0, lambda t=initial_estimate: self.estimated_time_label.config(text=t))
+            
+            # Start applying to jobs
+            applied_count = 0
+            failed_count = 0
+            
+            # Variables for dynamic time estimation
+            job_start_times = []
+            job_processing_times = []
+            
+            for i, job in enumerate(jobs_to_apply):
+                if not self.running:
+                    self.update_status("Stopped by user.")
+                    driver.quit()
+                    self.reset_ui()
+                    return
+                
+                # Record job start time for this specific job
+                job_start_time = time.time()
+                
+                # Update progress
+                progress = int((i / len(jobs_to_apply)) * 100) if jobs_to_apply else 0
+                self.root.after(0, lambda p=progress: self.progress_bar.config(value=p))
+                
+                # Show job details in status
+                job_title = job.get("Job Title", "Unknown")
+                self.update_status(f"Applying to: {job_title} ({i+1}/{len(jobs_to_apply)})")
+
+                # Apply to job using your existing function
+                try:
+                    result = apply_to_job_url(driver, job["Job URL"])
+                    
+                    # Record job completion time and calculate processing time for this job
+                    job_end_time = time.time()
+                    processing_time = job_end_time - job_start_time
+                    
+                    # Keep track of job times for estimation
+                    job_start_times.append(job_start_time)
+                    job_processing_times.append(processing_time)
+                    
+                    # Calculate dynamic time estimate after a few jobs
+                    if i >= 2 and len(jobs_to_apply) > i+1:
+                        # Calculate average time per job based on the last few jobs
+                        recent_times = job_processing_times[-min(10, len(job_processing_times)):]
+                        avg_time_per_job = sum(recent_times) / len(recent_times)
+                        
+                        # Calculate remaining time
+                        remaining_jobs = len(jobs_to_apply) - (i + 1)
+                        remaining_seconds = avg_time_per_job * remaining_jobs
+                        
+                        # Format remaining time string
+                        remaining_hours = int(remaining_seconds // 3600)
+                        remaining_minutes = int((remaining_seconds % 3600) // 60)
+                        remaining_seconds = int(remaining_seconds % 60)
+                        
+                        time_remaining = ""
+                        if remaining_hours > 0:
+                            time_remaining += f"{remaining_hours} hours "
+                        if remaining_minutes > 0 or remaining_hours > 0:
+                            time_remaining += f"{remaining_minutes} minutes "
+                        time_remaining += f"{remaining_seconds} seconds"
+                        
+                        # Update the estimated time label
+                        self.root.after(0, lambda t=time_remaining: self.estimated_time_label.config(text=t))
+                    
+                    if result:
+                        applied_count += 1
+                        # Update applied count
+                        count_to_display = applied_count
+                        self.root.after(0, lambda c=count_to_display: 
+                            self.jobs_applied_label.config(text=str(c)))
+                        
+                        # Save to applied jobs Excel file
+                        try:
+                            job["Applied"] = True
+                            if os.path.exists(applied_jobs_file):
+                                df_existing = pd.read_excel(applied_jobs_file)
+                            else:
+                                df_existing = pd.DataFrame(columns=[
+                                    "Job Title", "Job URL", "Company", "Location", 
+                                    "Employment Type", "Posted Date", "Applied"
+                                ])
+                            
+                            df_new = pd.DataFrame([job])
+                            df_combined = pd.concat([df_existing, df_new], ignore_index=True)
+                            df_combined.to_excel(applied_jobs_file, index=False)
+                        except Exception as e:
+                            self.logger.error(f"Error updating Excel file: {e}")
+                    else:
+                        failed_count += 1
+                        # Update failed count
+                        count_to_display = failed_count
+                        self.root.after(0, lambda c=count_to_display: 
+                            self.jobs_failed_label.config(text=str(c)))
+                        
+                        # Save to not applied jobs Excel file
+                        not_applied_file = "not_applied_jobs.xlsx"
+                        try:
+                            if os.path.exists(not_applied_file):
+                                df_existing = pd.read_excel(not_applied_file)
+                            else:
+                                df_existing = pd.DataFrame(columns=[
+                                    "Job Title", "Job URL", "Company", "Location", 
+                                    "Employment Type", "Posted Date", "Applied"
+                                ])
+                            
+                            job["Applied"] = False
+                            df_new = pd.DataFrame([job])
+                            df_combined = pd.concat([df_existing, df_new], ignore_index=True)
+                            df_combined.to_excel(not_applied_file, index=False)
+                        except Exception as e:
+                            self.logger.error(f"Error updating not_applied Excel file: {e}")
+                    
+                except Exception as e:
+                    self.logger.error(f"Error applying to {job_title}: {e}")
+                    failed_count += 1
+                    # Update failed count
+                    count_to_display = failed_count
+                    self.root.after(0, lambda c=count_to_display: 
+                        self.jobs_failed_label.config(text=str(c)))
+                
+                # Move mouse to prevent sleeping
+                pyautogui.moveRel(1, 1, duration=0.1)
+                pyautogui.moveRel(-1, -1, duration=0.1)
+            
+            # Compute execution time
+            end_time = time.time()
+            execution_time = end_time - start_time
+            hours, remainder = divmod(execution_time, 3600)
+            minutes, seconds = divmod(remainder, 60)
+            
+            time_str = f"{int(hours)}h {int(minutes)}m {seconds:.2f}s"
+            self.update_status(f"Completed! Applied: {applied_count}, Failed: {failed_count}, Time: {time_str}")
+            
+            # Final progress update
+            self.root.after(0, lambda: self.progress_bar.config(value=100))
+            # Clear estimated time as we're done
+            self.root.after(0, lambda: self.estimated_time_label.config(text="Completed"))
+            
+            # Save job data to JSON file
+            import json
+            try:
+                job_data = {
+                    "Total Jobs Found": len(all_jobs),
+                    "Jobs Applied": applied_count,
+                    "Jobs Failed": failed_count,
+                    "Execution Time": time_str,
+                    "Date": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+                with open("job_application_summary.json", "w") as f:
+                    json.dump(job_data, f, indent=4)
+            except Exception as e:
+                self.logger.error(f"Error saving job data: {e}")
+                
+            # Show completion message
+            self.root.after(0, lambda: messagebox.showinfo(
+                "Process Complete", 
+                f"Application process completed!\n\n"
+                f"Applied to {applied_count} jobs\n"
+                f"Failed for {failed_count} jobs\n\n"
+                f"Total execution time: {time_str}"
+            ))
+            
+            # Clean up
+            driver.quit()
+                
+        except Exception as e:
+            self.logger.error(f"Error in job application process: {e}")
+            self.update_status(f"Error: {str(e)}")
+            self.root.after(0, lambda: messagebox.showerror(
+                "Error", 
+                f"An error occurred: {str(e)}"
+            ))
+        finally:
+            # Reset UI
+            self.reset_ui()
+
+
+            
+    def stop_applying(self):
+        """Stop the job application process"""
+        if not self.running:
+            return
+            
+        self.running = False
+        self.stop_button.config(state="disabled")
+        self.status_label.config(text="Stopping... Please wait.")
+        self.logger.info("User requested to stop the application process")
+        
+    def reset_ui(self):
+        """Reset UI after job completion or stop"""
+        self.running = False
+        self.start_button.config(state="normal")
+        self.stop_button.config(state="normal", text="Stop")
+        
+    def update_status(self, message):
+        """Update status message and log it"""
+        self.logger.info(message)
+        self.root.after(0, lambda msg=message: self.status_label.config(text=msg))
+        
+
+class LogTextHandler(logging.Handler):
+    """Custom log handler that redirects logs to a tk Text widget"""
+    
+    def __init__(self, text_widget):
+        logging.Handler.__init__(self)
+        self.text_widget = text_widget
+        
+    def emit(self, record):
+        msg = self.format(record)
+        
+        def append_log():
+            self.text_widget.config(state="normal")
+            self.text_widget.insert("end", msg + "\n")
+            self.text_widget.see("end")  # Scroll to the bottom
+            self.text_widget.config(state="disabled")
+            
+        # Schedule the update in the main thread
+        self.text_widget.after(0, append_log)
+        
+
+def main():
+    root = tk.Tk()
+    app = DiceAutoBotApp(root)
+    root.protocol("WM_DELETE_WINDOW", root.quit)  # Ensure clean exit
+    root.mainloop()
+
+if __name__ == "__main__":
+    main()
+
+
+
+[Skipped] Binary or non-UTF-8 file: /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/applied_jobs.xlsx
+
+
+======= Contents of /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/core/__init__.py =======
+
+
+
+
+======= Contents of /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/core/browser_detector.py =======
+
+import os
+import platform
+import subprocess
+import glob
+from pathlib import Path
+from dotenv import load_dotenv, set_key, find_dotenv
+
+def detect_browser_paths():
+    """
+    Detects browser paths on the current system (macOS or Windows) and updates .env file.
+    Searches in this order: Brave, Chrome, Safari, Edge, Firefox.
+    
+    Returns:
+        str: The path to the detected browser or None if no browser is found.
+    """
+    system = platform.system()
+    browser_paths = {}
+    
+    # print(f"Detecting browsers on {system} platform...")
+    
+    if system == "Darwin":  # macOS
+        # Define common browser paths on macOS
+        possible_paths = {
+            "Brave": [
+                "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+                "/Applications/Brave Browser Dev.app/Contents/MacOS/Brave Browser Dev",
+                "/Applications/Brave Browser Beta.app/Contents/MacOS/Brave Browser Beta"
+            ],
+            "Chrome": [
+                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                "/Applications/Google Chrome Dev.app/Contents/MacOS/Google Chrome Dev",
+                "/Applications/Google Chrome Beta.app/Contents/MacOS/Google Chrome Beta"
+            ],
+            "Safari": ["/Applications/Safari.app/Contents/MacOS/Safari"],
+            "Firefox": ["/Applications/Firefox.app/Contents/MacOS/firefox"],
+            "Edge": ["/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"]
+        }
+        
+        # Check each browser path
+        for browser, paths in possible_paths.items():
+            for path in paths:
+                if os.path.exists(path):
+                    browser_paths[browser] = path
+                    # print(f"Found {browser} at: {path}")
+    
+    
+    elif system == "Windows":
+        # Get all user profiles 
+        users_dir = os.path.join(os.environ.get("SystemDrive", "C:"), "Users")
+        user_folders = [f for f in os.listdir(users_dir) if os.path.isdir(os.path.join(users_dir, f)) 
+                        and f not in ["Public", "Default", "Default User", "All Users"]]
+        
+        # Standard program locations
+        program_files = os.environ.get("ProgramFiles", "C:\\Program Files")
+        program_files_x86 = os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)")
+        
+        # Possible browser paths across all users and standard locations
+        possible_paths = {
+            "Brave": [
+                f"{program_files}\\BraveSoftware\\Brave-Browser\\Application\\brave.exe",
+                f"{program_files_x86}\\BraveSoftware\\Brave-Browser\\Application\\brave.exe"
+            ],
+            "Chrome": [
+                f"{program_files}\\Google\\Chrome\\Application\\chrome.exe",
+                f"{program_files_x86}\\Google\\Chrome\\Application\\chrome.exe"
+            ],
+            "Edge": [
+                f"{program_files}\\Microsoft\\Edge\\Application\\msedge.exe",
+                f"{program_files_x86}\\Microsoft\\Edge\\Application\\msedge.exe"
+            ],
+            "Firefox": [
+                f"{program_files}\\Mozilla Firefox\\firefox.exe",
+                f"{program_files_x86}\\Mozilla Firefox\\firefox.exe"
+            ]
+        }
+        
+        # Add user-specific locations for browsers
+        for user in user_folders:
+            user_path = os.path.join(users_dir, user)
+            
+            # AppData locations
+            local_app_data = os.path.join(user_path, "AppData", "Local")
+            roaming_app_data = os.path.join(user_path, "AppData", "Roaming")
+            
+            # Add common user-specific browser locations
+            if os.path.exists(local_app_data):
+                possible_paths["Brave"].extend([
+                    os.path.join(local_app_data, "BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
+                    # Handle potential user-specific install directories
+                    *glob.glob(os.path.join(user_path, "**", "Brave-Browser", "Application", "brave.exe"), recursive=True)
+                ])
+                
+                possible_paths["Chrome"].extend([
+                    os.path.join(local_app_data, "Google", "Chrome", "Application", "chrome.exe"),
+                    # Handle potential user-specific install directories
+                    *glob.glob(os.path.join(user_path, "**", "Chrome", "Application", "chrome.exe"), recursive=True)
+                ])
+                
+                possible_paths["Edge"].extend([
+                    os.path.join(local_app_data, "Microsoft", "Edge", "Application", "msedge.exe"),
+                    # Handle potential user-specific install directories
+                    *glob.glob(os.path.join(user_path, "**", "Edge", "Application", "msedge.exe"), recursive=True)
+                ])
+            
+            if os.path.exists(roaming_app_data):
+                possible_paths["Firefox"].extend([
+                    os.path.join(roaming_app_data, "Mozilla", "Firefox", "firefox.exe"),
+                    # Handle potential user-specific install directories
+                    *glob.glob(os.path.join(user_path, "**", "Firefox", "firefox.exe"), recursive=True)
+                ])
+        
+        # Check each browser path
+        for browser, paths in possible_paths.items():
+            for path in paths:
+                if os.path.exists(path):
+                    browser_paths[browser] = path
+                    # print(f"Found {browser} at: {path}")
+                    break  # Take first found instance of each browser
+
+    # Try to detect browsers using command line on Windows or Unix-like
+    if not browser_paths:
+        try:
+            if system == 'Windows':
+                # Try using where command on Windows
+                for browser in ["brave", "chrome", "msedge", "firefox"]:
+                    try:
+                        result = subprocess.run(f'where {browser}', shell=True, capture_output=True, text=True)
+                        if result.returncode == 0 and result.stdout.strip():
+                            path = result.stdout.strip().split('\n')[0]  # Take first result
+                            browser_name = browser.capitalize()
+                            if browser == "msedge":
+                                browser_name = "Edge"
+                            browser_paths[browser_name] = path
+                            # print(f"Found {browser_name} at: {path}")
+                    except Exception:
+                        pass
+            else:
+                # Try using which command on Unix-like
+                for browser in ["brave", "chrome", "chromium", "firefox", "safari"]:
+                    try:
+                        result = subprocess.run(f'which {browser}', shell=True, capture_output=True, text=True)
+                        if result.returncode == 0 and result.stdout.strip():
+                            browser_name = browser.capitalize()
+                            browser_paths[browser_name] = result.stdout.strip()
+                            # print(f"Found {browser_name} at: {result.stdout.strip()}")
+                    except Exception:
+                        pass
+        except Exception as e:
+            print(f"Error detecting browser using command line: {e}")
+    
+    # IMPORTANT CHANGE: Always clear the existing browser path in .env to force detection
+    from dotenv import set_key, find_dotenv
+    dotenv_path = find_dotenv()
+    if dotenv_path:
+        load_dotenv(dotenv_path)  # Load first to get other variables
+        set_key(dotenv_path, "WEB_BROWSER_PATH", "")  # Clear the browser path
+    
+    # Order of preference: Brave, Chrome, Safari, Edge, Firefox
+    preferred_order = ["Brave", "Chrome", "Safari", "Edge", "Firefox"]
+    
+    # Return the first browser found in the preferred order
+    selected_browser = None
+    selected_path = None
+    
+    for browser in preferred_order:
+        if browser in browser_paths:
+            selected_browser = browser
+            selected_path = browser_paths[browser]
+            print(f"Selected {selected_browser} browser")
+            break
+    
+    if selected_path:
+        # print(f"Selected {selected_browser} at {selected_path} as the preferred browser")
+        update_env_file(selected_path)
+        return selected_path
+    else:
+        print("No compatible browsers found!")
+        return None
+
+def update_env_file(browser_path):
+    """
+    Updates or creates .env file with the browser path.
+    
+    Parameters:
+        browser_path (str): Path to the browser executable.
+    """
+    dotenv_path = find_dotenv()
+    if not dotenv_path:
+        dotenv_path = os.path.join(os.getcwd(), '.env')
+        Path(dotenv_path).touch(exist_ok=True)
+        # print(f"Created new .env file at {dotenv_path}")
+    
+    # Load existing .env file
+    load_dotenv(dotenv_path)
+    
+    # Get current value
+    current_path = os.getenv("WEB_BROWSER_PATH")
+    
+    if current_path != browser_path:
+        # Update .env file with new browser path
+        # Using set_key to maintain other variables in .env
+        set_key(dotenv_path, "WEB_BROWSER_PATH", browser_path)
+        # print(f"Updated WEB_BROWSER_PATH in .env file: {browser_path}")
+    else:
+        # print(f"WEB_BROWSER_PATH already set to: {browser_path}")
+        pass
+    
+    return browser_path
+
+def get_browser_path():
+    """
+    Gets the browser path from .env file or detects it if not available.
+    
+    Returns:
+        str: The path to the browser.
+    """
+    # Load .env file
+    load_dotenv()
+    
+    # Check if WEB_BROWSER_PATH exists in .env
+    browser_path = os.getenv("WEB_BROWSER_PATH")
+    
+    if browser_path and os.path.exists(browser_path):
+        # print(f"Using existing browser path from .env: {browser_path}")
+        return browser_path
+    
+    # Detect browser paths if not found in .env or if path doesn't exist
+    browser_path = detect_browser_paths()
+    
+    if not browser_path:
+        raise Exception("No compatible browser found on your system. Please install Brave, Chrome, Safari, Edge, or Firefox.")
+    
+    return browser_path
+
+if __name__ == "__main__":
+    try:
+        browser_path = get_browser_path()
+        print(f"Browser path successfully set: {browser_path}")
+    except Exception as e:
+        print(f"Error: {e}")
+
+
+======= Contents of /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/core/dice_login.py =======
+
+import os
+import time
+from pathlib import Path
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from dotenv import load_dotenv, set_key, find_dotenv
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
+
+def update_dice_credentials(username, password, update_env=True):
+    """
+    Updates the Dice credentials in the .env file.
+    
+    Parameters:
+        username (str): Dice account email/username
+        password (str): Dice account password
+        update_env (bool): Whether to update the .env file or not
+        
+    Returns:
+        bool: True if credentials were updated successfully
+    """
+    if not username or not password:
+        print("Invalid credentials provided. Both username and password are required.")
+        return False
+    
+    try:
+        if update_env:
+            # Find or create .env file
+            dotenv_path = find_dotenv()
+            if not dotenv_path:
+                dotenv_path = os.path.join(os.getcwd(), '.env')
+                Path(dotenv_path).touch(exist_ok=True)
+                print(f"Created new .env file at {dotenv_path}")
+            
+            # Load existing .env file
+            load_dotenv(dotenv_path)
+            
+            # Update credentials in .env file
+            set_key(dotenv_path, "DICE_USERNAME", username)
+            set_key(dotenv_path, "DICE_PASSWORD", password)
+            print("Dice credentials updated in .env file.")
+        
+        # Set the environment variables for current session
+        os.environ["DICE_USERNAME"] = username
+        os.environ["DICE_PASSWORD"] = password
+        
+        return True
+    except Exception as e:
+        print(f"Error updating credentials: {e}")
+        return False
+
+def get_headless_driver():
+    """
+    Creates a headless WebDriver for credential validation
+    
+    Returns:
+        webdriver: A headless Chrome/Brave WebDriver instance
+    """
+    try:
+        # Import browser detector if available
+        from browser_detector import get_browser_path
+        web_browser_path = get_browser_path()
+    except ImportError:
+        # Fallback if browser_detector is not available
+        web_browser_path = None
+    
+    options = Options()
+    
+    # Add headless options
+    options.add_argument("--headless")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--window-size=1920,1080")
+    options.add_argument("--disable-extensions")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--no-sandbox")
+    
+    # Set browser binary location if available
+    if web_browser_path:
+        options.binary_location = web_browser_path
+    
+    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+    return driver
+
+def validate_dice_credentials(username, password, headless=True):
+    """
+    Validates Dice credentials by attempting to log in using a headless browser.
+    
+    Parameters:
+        username (str): Dice account email/username
+        password (str): Dice account password
+        headless (bool): Whether to use headless mode for validation
+        
+    Returns:
+        bool: True if login was successful, False otherwise
+    """
+    print(f"Validating credentials for {username}...")
+    
+    # Create driver (headless or regular)
+    if headless:
+        driver = get_headless_driver()
+    else:
+        # Import from main file to get regular driver
+        from browser_detector import get_browser_path
+        from selenium import webdriver
+        from selenium.webdriver.chrome.options import Options
+        from selenium.webdriver.chrome.service import Service
+        from webdriver_manager.chrome import ChromeDriverManager
+        
+        web_browser_path = get_browser_path()
+        options = Options()
+        options.binary_location = web_browser_path
+        options.add_argument("--start-maximized")
+        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+    
+    try:
+        # Try login with provided credentials
+        driver.get("https://www.dice.com/dashboard/login")
+        wait = WebDriverWait(driver, 10)
+        
+        # Enter email/username
+        email_field = wait.until(EC.presence_of_element_located((By.NAME, "email")))
+        email_field.clear()
+        email_field.send_keys(username)
+        
+        # Click continue
+        continue_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[@data-testid='sign-in-button']")))
+        continue_button.click()
+        
+        # Enter password
+        password_field = wait.until(EC.presence_of_element_located((By.NAME, "password")))
+        password_field.clear()
+        password_field.send_keys(password)
+        
+        # Click login button
+        login_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[@data-testid='submit-password']")))
+        login_button.click()
+        
+        # Check for successful login
+        try:
+            # Wait for the search form to appear after successful login
+            long_wait = WebDriverWait(driver, 20)
+            login_success = long_wait.until(EC.presence_of_element_located((By.XPATH, "//form[@class='flex h-auto w-full flex-row rounded-lg rounded-bl-lg bg-white']")))
+            print("Login successful with provided credentials!")
+            result = True
+        except Exception:
+            # Look for error messages
+            try:
+                error_message = wait.until(EC.presence_of_element_located(
+                    (By.XPATH, "//div[contains(@class, 'error-message') or contains(@class, 'alert-danger')]")))
+                print(f"Login failed: {error_message.text}")
+            except Exception:
+                print("Login failed: Could not verify login result")
+            result = False
+            
+        return result
+        
+    except Exception as e:
+        print(f"Error validating credentials: {e}")
+        return False
+    finally:
+        driver.quit()
+
+def login_to_dice(driver, credentials_from_params=None):
+    """
+    Logs into Dice using credentials from the .env file or provided parameters.
+    
+    Parameters:
+        driver (selenium.webdriver): Selenium WebDriver instance.
+        credentials_from_params (tuple): Optional (username, password) tuple to use instead of .env
+    
+    Returns:
+        bool: True if login is successful, False otherwise.
+    """
+    # Load credentials from parameters or environment
+    if credentials_from_params and len(credentials_from_params) == 2:
+        username, password = credentials_from_params
+    else:
+        # Load from environment
+        load_dotenv()
+        username = os.getenv("DICE_USERNAME")
+        password = os.getenv("DICE_PASSWORD")
+    
+    if not username or not password:
+        raise Exception("Dice credentials not found. Please set DICE_USERNAME and DICE_PASSWORD in .env file or provide them as parameters.")
+    
+    driver.get("https://www.dice.com/dashboard/login")
+    wait = WebDriverWait(driver, 10)
+
+    try:
+        email_field = wait.until(EC.presence_of_element_located((By.NAME, "email")))
+        email_field.clear()
+        email_field.send_keys(username)
+
+        continue_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[@data-testid='sign-in-button']")))
+        continue_button.click()
+
+        password_field = wait.until(EC.presence_of_element_located((By.NAME, "password")))
+        password_field.clear()
+        password_field.send_keys(password)
+
+        login_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[@data-testid='submit-password']")))
+        login_button.click()
+
+        # Use a longer wait time (20 seconds) for the final step
+        long_wait = WebDriverWait(driver, 20)
+        long_wait.until(EC.presence_of_element_located((By.XPATH, "//form[@class='flex h-auto w-full flex-row rounded-lg rounded-bl-lg bg-white']")))
+        print("Login successful!")
+        return True
+
+    except Exception as e:
+        print("Login failed:", e)
+        return False
+
+def setup_credentials_interactive(headless=True):
+    """
+    Interactive command-line setup for Dice credentials.
+    Tests login before saving to .env file.
+    
+    Parameters:
+        headless (bool): Whether to use headless mode for validation
+        
+    Returns:
+        bool: True if credentials were successfully set up
+    """
+    print("\n=== Dice Credentials Setup ===")
+    print("Please enter your Dice.com login information.")
+    
+    username = input("Email/Username: ").strip()
+    password = input("Password: ").strip()
+    
+    if not username or not password:
+        print("Both username and password are required.")
+        return False
+    
+    # Validate the credentials
+    if validate_dice_credentials(username, password, headless=headless):
+        # Save to .env file
+        update_dice_credentials(username, password)
+        return True
+    else:
+        print("Invalid credentials. Please try again.")
+        return False
+
+if __name__ == "__main__":
+    # This allows running the file directly for credential setup
+    try:
+        print("Starting Dice credential setup...")
+        success = False
+        
+        while not success:
+            success = setup_credentials_interactive(headless=True)
+            if not success:
+                retry = input("Would you like to try again? (y/n): ").lower()
+                if retry != 'y':
+                    break
+        
+        if success:
+            print("Credential setup complete! You can now run the main application.")
+        else:
+            print("Credential setup was not completed. You will need to set up credentials before using the application.")
+    
+    except Exception as e:
+        print(f"An error occurred during setup: {e}")
+
+
+======= Contents of /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/core/main_script.py =======
+
+import os
+import json
+import pandas as pd
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.keys import Keys
+from selenium.common.exceptions import ElementClickInterceptedException
+from dotenv import load_dotenv
+import time
+import re
+import pyautogui
+import datetime
+import requests
+from bs4 import BeautifulSoup
+from urllib.parse import quote
+# Try both absolute and relative imports for compatibility
+try:
+    from dice_auto_apply.core.browser_detector import get_browser_path
+    from dice_auto_apply.core.dice_login import login_to_dice
+except ImportError:
+    try:
+        from ..core.browser_detector import get_browser_path
+        from ..core.dice_login import login_to_dice
+    except ImportError:
+        from core.browser_detector import get_browser_path
+        from core.dice_login import login_to_dice
+
+
+# Load environment variables
+load_dotenv()
+
+def get_web_driver(headless=False, retry_with_alternative=True):
+    """
+    Initializes a Selenium WebDriver with fallback options.
+    If the primary browser (Brave) fails to load, it will try Chrome as a fallback.
+    
+    Parameters:
+        headless (bool): Whether to use headless mode
+        retry_with_alternative (bool): Whether to try alternative browsers if primary fails
+        
+    Returns:
+        WebDriver: Initialized WebDriver instance
+    """
+    import platform  # Add this import for system detection
+    
+    # Get browser path from .env or detect it
+    web_browser_path = get_browser_path()
+    
+    if not web_browser_path:
+        raise Exception("Browser path not found in .env file. Please set WEB_BROWSER_PATH.")
+
+    tried_browsers = []
+    
+    # Try the primary browser first
+    try:
+        options = Options()
+        options.binary_location = web_browser_path
+        
+        # Add headless mode options if requested
+        if headless:
+            options.add_argument("--headless")
+            
+        options.add_argument("--disable-gpu")
+        options.add_argument("--window-size=1920,1080")
+        options.add_argument("--disable-blink-features=AutomationControlled")
+        options.add_argument("--disable-popup-blocking")
+        options.add_argument("--disable-web-security")
+        options.add_argument("--disable-features=EnableEphemeralFlashPermission")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--remote-debugging-port=9222")
+        options.add_argument("--disable-infobars")
+        options.add_argument("--disable-notifications")
+        
+        # Clear browser cache and cookies
+        options.add_argument("--disable-application-cache")
+        options.add_argument("--incognito")
+
+        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+        driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        
+        # Test navigation to a simple page to verify browser is working
+        driver.get("https://www.google.com")
+        driver.find_element(By.TAG_NAME, "body")  # Should work if page loaded
+        
+        print(f"Successfully initialized browser: {os.path.basename(web_browser_path)}")
+        return driver
+        
+    except Exception as e:
+        tried_browsers.append(os.path.basename(web_browser_path))
+        print(f"Error initializing primary browser ({os.path.basename(web_browser_path)}): {e}")
+        
+        if not retry_with_alternative:
+            raise Exception(f"Failed to initialize browser and retry is disabled.")
+    
+    # If we get here, the primary browser failed - let's try alternatives
+    system = platform.system()
+    alternative_paths = []
+    
+    if system == "Darwin":  # macOS
+        alternative_paths = [
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "/Applications/Firefox.app/Contents/MacOS/firefox",
+            "/Applications/Safari.app/Contents/MacOS/Safari"
+        ]
+    elif system == "Windows":
+        program_files = os.environ.get("ProgramFiles", "C:\\Program Files")
+        program_files_x86 = os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)")
+        alternative_paths = [
+            f"{program_files}\\Google\\Chrome\\Application\\chrome.exe",
+            f"{program_files_x86}\\Google\\Chrome\\Application\\chrome.exe",
+            f"{program_files}\\Mozilla Firefox\\firefox.exe",
+            f"{program_files_x86}\\Mozilla Firefox\\firefox.exe"
+        ]
+    else:  # Linux
+        alternative_paths = [
+            "/usr/bin/google-chrome",
+            "/usr/bin/google-chrome-stable",
+            "/usr/bin/firefox"
+        ]
+    
+    # Try each alternative browser
+    for alt_path in alternative_paths:
+        if alt_path not in tried_browsers and os.path.exists(alt_path):
+            try:
+                options = Options()
+                options.binary_location = alt_path
+                
+                if headless:
+                    options.add_argument("--headless")
+                    
+                options.add_argument("--disable-gpu")
+                options.add_argument("--window-size=1920,1080")
+                options.add_argument("--disable-blink-features=AutomationControlled")
+                options.add_argument("--incognito")  # Use incognito to avoid cache issues
+                
+                driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+                driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+                
+                # Test navigation
+                driver.get("https://www.google.com")
+                driver.find_element(By.TAG_NAME, "body")
+                
+                print(f"Successfully initialized alternative browser: {os.path.basename(alt_path)}")
+                
+                # Update the .env file with working browser
+                from dotenv import set_key, find_dotenv
+                dotenv_path = find_dotenv()
+                if dotenv_path:
+                    set_key(dotenv_path, "WEB_BROWSER_PATH", alt_path)
+                    print(f"Updated WEB_BROWSER_PATH in .env file to: {alt_path}")
+                
+                return driver
+                
+            except Exception as e:
+                tried_browsers.append(os.path.basename(alt_path))
+                print(f"Error initializing alternative browser ({os.path.basename(alt_path)}): {e}")
+    
+    # If we get here, all browsers failed
+    raise Exception(f"Failed to initialize any browser. Tried: {', '.join(tried_browsers)}")
+
+
+
+def apply_to_job_url(driver, job_url):
+    """
+    Applies to a job without opening a new tab, preventing focus stealing.
+    Instead navigates to job URL in the same tab and returns to original URL when done.
+    """
+    # Store current URL to return to later
+    original_url = driver.current_url
+    
+    # Navigate to job URL in the same tab
+    driver.get(job_url)
+    
+    wait = WebDriverWait(driver, 10)
+    applied = False
+    
+    # move pointer to prevent sleeping
+    pyautogui.moveRel(1, 1, duration=0.1)
+    pyautogui.moveRel(-1, -1, duration=0.1)
+
+    try:
+        # First wait for #applyButton to be present in the DOM
+        wait.until(EC.presence_of_element_located((By.ID, "applyButton")))
+        
+        # Wait and continuously poll for text in shadow DOM with a timeout
+        max_attempts = 10
+        shadow_content_found = False
+        
+        for attempt in range(max_attempts):
+            # Check for existence of either "Application Submitted" or "Easy apply" text
+            shadow_check = driver.execute_script("""
+                // Get the apply-button-wc element
+                const applyButtonWc = document.querySelector('apply-button-wc');
+                if (!applyButtonWc) return { found: false, message: 'No apply-button-wc found' };
+                
+                // Wait for shadow root
+                const shadowRoot = applyButtonWc.shadowRoot;
+                if (!shadowRoot) return { found: false, message: 'No shadow root found' };
+                
+                // Get all text content from the shadow DOM
+                const shadowText = shadowRoot.textContent || '';
+                
+                // Check for specific text content
+                if (shadowText.includes('Application Submitted')) {
+                    return { found: true, status: 'already_applied', message: 'Application Submitted text found' };
+                } else if (shadowText.includes('Easy apply')) {
+                    return { found: true, status: 'can_apply', message: 'Easy apply text found' };
+                }
+                
+                return { found: false, message: 'No relevant text found in shadow DOM' };
+            """)
+            
+            if shadow_check.get('found', False):
+                shadow_content_found = True
+                status = shadow_check.get('status', 'unknown')
+                message = shadow_check.get('message', '')
+                # print(f"Shadow DOM content found: {status} - {message}")
+                break
+            
+            # If not found, wait and try again
+            time.sleep(0.5)
+        
+        if not shadow_content_found:
+            # print("Shadow DOM content not found after multiple attempts")
+            driver.get(original_url)  # Go back to original URL
+            return False
+        
+        # Process based on the shadow DOM status
+        if status == 'already_applied':
+            print(f"Skipping this Job as it is already applied: {job_url}")
+            applied = True
+            
+        elif status == 'can_apply':
+            # Click the Easy apply button
+            click_success = driver.execute_script("""
+                const applyButtonWc = document.querySelector('apply-button-wc');
+                if (!applyButtonWc || !applyButtonWc.shadowRoot) return false;
+                
+                // Try three different ways to find the button
+                const easyApplyBtn = 
+                    // Method 1: Direct button in shadow DOM
+                    applyButtonWc.shadowRoot.querySelector('button.btn.btn-primary') ||
+                    // Method 2: Button inside apply-button element
+                    (applyButtonWc.shadowRoot.querySelector('apply-button') && 
+                     applyButtonWc.shadowRoot.querySelector('apply-button').shadowRoot &&
+                     applyButtonWc.shadowRoot.querySelector('apply-button').shadowRoot.querySelector('button.btn.btn-primary')) ||
+                    // Method 3: Find any button containing "Easy apply" text
+                    Array.from(applyButtonWc.shadowRoot.querySelectorAll('button')).find(btn => 
+                        btn.textContent.includes('Easy apply')
+                    );
+                
+                if (!easyApplyBtn) return false;
+                
+                // Click the button
+                easyApplyBtn.click();
+                return true;
+            """)
+            
+            if click_success:
+                # Continue with the application process
+                try:
+                    # Locate the 'Next' button
+                    next_button = wait.until(EC.element_to_be_clickable(
+                        (By.XPATH, "//button[contains(@class, 'btn-next') and normalize-space()='Next']")
+                    ))
+                    
+                    # Click Next using JavaScript
+                    driver.execute_script("arguments[0].click();", next_button)
+                    
+                    # Locate the 'Submit' button
+                    submit_button = wait.until(EC.element_to_be_clickable(
+                        (By.XPATH, "//button[contains(@class, 'btn-next') and normalize-space()='Submit']")
+                    ))
+                    
+                    # Click Submit using JavaScript
+                    driver.execute_script("arguments[0].click();", submit_button)
+                    
+                    # Wait for confirmation
+                    try:
+                        confirmation = wait.until(EC.presence_of_element_located(
+                            (By.XPATH, "//header[contains(@class, 'post-apply-banner')]//h1[contains(text(), 'Application submitted')]")
+                        ))
+                        print(f"Application confirmed for New Job: {job_url}")
+                        applied = True
+                    except Exception as e:
+                        print(f"Could not confirm application submission: {e}")
+                        applied = False
+                        
+                except Exception as e:
+                    applied = False
+            else:
+                print("Failed to click Easy apply button")
+                applied = False
+        else:
+            print(f"Unknown shadow DOM state: {status}")
+            applied = False
+            
+    except Exception as e:
+        print(f"Error in application process: {e}")
+        applied = False
+        
+    # Always return to the original URL
+    driver.get(original_url)
+    return applied
+
+def fetch_jobs_with_requests(driver, search_query, include_keywords=None, exclude_keywords=None):
+    """
+    Use the existing browser instance to fetch job listings, preventing focus stealing
+    and including mouse movements to prevent system sleeping.
+    
+    Returns:
+        tuple: (included_jobs_list, excluded_jobs_list) - Lists of jobs that match and don't match criteria
+    """
+    print(f"Fetching jobs for query: {search_query}")
+    
+    # Format search parameters for URL
+    encoded_query = quote(search_query)
+    
+    # Construct the URL with all filters already applied
+    base_url = f"https://www.dice.com/jobs?q={encoded_query}&countryCode=US&radius=30&radiusUnit=mi&page=1&pageSize=100&filters.postedDate=ONE&filters.employmentType=CONTRACTS&language=en"
+    
+    included_jobs = []
+    excluded_jobs = []  # Track excluded jobs with reason
+    total_jobs_found = 0
+    
+    try:
+        # First load the initial page to get total job count
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                driver.get(base_url)
+                break
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    print(f"Error loading initial page. Retry {attempt+1}/{max_retries}...")
+                    time.sleep(2)
+                else:
+                    print(f"Failed to load initial page after {max_retries} attempts.")
+                    raise e
+        
+        # Move mouse to prevent system sleeping
+        pyautogui.moveRel(1, 1, duration=0.1)
+        pyautogui.moveRel(-1, -1, duration=0.1)
+        
+        wait = WebDriverWait(driver, 20)  # Increased timeout
+        
+        # Wait for the page to load completely
+        wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+        time.sleep(3)  # Extra wait for dynamic content
+        
+        # Get total jobs from the job count element
+        total_pages = 1
+        try:
+            # First try explicit wait for the element
+            job_count_element = wait.until(EC.presence_of_element_located((By.ID, "totalJobCount")))
+            # Additional JavaScript check to ensure element is visible and has text
+            total_jobs_text = driver.execute_script("""
+                const element = document.getElementById('totalJobCount');
+                if (element && element.innerText.trim()) {
+                    return element.innerText.trim();
+                }
+                return '0';
+            """)
+            
+            total_jobs_text = total_jobs_text.replace(",", "")
+            total_jobs = int(total_jobs_text)
+            print(f"Total jobs for query '{search_query}': {total_jobs}")
+            
+            # Calculate total pages needed (100 jobs per page)
+            jobs_per_page = 100
+            total_pages = min(11, (total_jobs + jobs_per_page - 1) // jobs_per_page)  # Ceiling division, max 11 pages
+            print(f"Will process {total_pages} pages ({jobs_per_page} jobs per page)")
+            
+        except Exception as e:
+            print(f"Could not find total job count, defaulting to 3 pages: {str(e)}")
+            total_jobs = 0
+            total_pages = 3  # Default to 3 pages if we can't determine the count
+        
+        # Process each page based on calculated total
+        for page in range(1, total_pages + 1):
+            # Move mouse to prevent system sleeping
+            pyautogui.moveRel(1, 1, duration=0.1)
+            pyautogui.moveRel(-1, -1, duration=0.1)
+            
+            # Construct URL for current page
+            current_url = base_url.replace("page=1", f"page={page}")
+            print(f"Processing page {page}/{total_pages}")
+            
+            # Retry mechanism for loading each page
+            page_load_success = False
+            for retry in range(max_retries):
+                try:
+                    # Navigate to the page with timeout handling
+                    driver.get(current_url)
+                    
+                    # Wait for job cards or error indication to appear
+                    try:
+                        # Wait longer for pages after page 3 (which seem problematic)
+                        wait_time = 25 if page > 3 else 15
+                        
+                        # Wait for either job cards OR an indication there are no results
+                        job_cards_present = driver.execute_script("""
+                            return new Promise(resolve => {
+                                const checkForElements = () => {
+                                    const cards = document.querySelectorAll('dhi-search-card');
+                                    const noResults = document.querySelector('.no-results-container');
+                                    if (cards && cards.length > 0) {
+                                        resolve(true);
+                                    } else if (noResults) {
+                                        resolve(false);
+                                    } else {
+                                        setTimeout(checkForElements, 500);
+                                    }
+                                };
+                                checkForElements();
+                            });
+                        """)
+                        
+                        if not job_cards_present:
+                            print(f"No job cards found on page {page} (confirmed by page)")
+                            break
+                            
+                        page_load_success = True
+                        break
+                    except Exception:
+                        if retry < max_retries - 1:
+                            print(f"Waiting for job cards failed on page {page}. Retry {retry+1}/{max_retries}...")
+                            time.sleep(2)
+                        else:
+                            print(f"Could not find job cards on page {page} after {max_retries} attempts.")
+                
+                except Exception as e:
+                    if retry < max_retries - 1:
+                        print(f"Error loading page {page}. Retry {retry+1}/{max_retries}...")
+                        time.sleep(3)
+                    else:
+                        print(f"Failed to load page {page} after {max_retries} attempts. Error: {str(e)}")
+            
+            if not page_load_success:
+                print(f"Skipping page {page} due to load failures.")
+                continue
+            
+            # Find all job cards
+            try:
+                job_cards = driver.find_elements(By.CSS_SELECTOR, "dhi-search-card")
+                if not job_cards:
+                    print(f"No job cards found on page {page}")
+                    continue
+                    
+                print(f"Found {len(job_cards)} jobs on page {page}")
+                
+                # Process each job card
+                for card_index, card in enumerate(job_cards):
+                    # Extract job details using JavaScript
+                    job_data = driver.execute_script("""
+                        const card = arguments[0];
+                        
+                        try {
+                            // Get job title and URL
+                            const titleElement = card.querySelector("a[data-cy='card-title-link']");
+                            const jobTitle = titleElement ? titleElement.textContent.trim() : "Unknown";
+                            const jobId = titleElement ? titleElement.id : null;
+                            const jobUrl = jobId ? `https://www.dice.com/job-detail/${jobId}` : "Unknown";
+                            
+                            // Get company
+                            const company = card.querySelector("a[data-cy='search-result-company-name']");
+                            const companyName = company ? company.textContent.trim() : "Unknown";
+                            
+                            // Get location
+                            const location = card.querySelector("span[data-cy='search-result-location']");
+                            const jobLocation = location ? location.textContent.trim() : "Unknown";
+                            
+                            // Get employment type
+                            const empType = card.querySelector("span[data-cy='search-result-employment-type']");
+                            const jobEmpType = empType ? empType.textContent.trim() : "Unknown";
+                            
+                            // Get posted date
+                            const posted = card.querySelector("span[data-cy='card-posted-date']");
+                            const jobPostedDate = posted ? posted.textContent.trim() : "Unknown";
+                            
+                            return {
+                                jobTitle,
+                                jobUrl,
+                                companyName,
+                                jobLocation,
+                                jobEmpType,
+                                jobPostedDate,
+                                error: null
+                            };
+                        } catch (err) {
+                            return {
+                                error: err.toString(),
+                                html: card.innerHTML.substring(0, 200) + "..."
+                            };
+                        }
+                    """, card)
+                    
+                    # Skip if error in extraction
+                    if job_data.get('error'):
+                        continue
+                        
+                    job_title = job_data.get('jobTitle', "Unknown")
+                    job_url = job_data.get('jobUrl', "Unknown")
+                    company_name = job_data.get('companyName', "Unknown")
+                    job_location = job_data.get('jobLocation', "Unknown")
+                    job_employment_type = job_data.get('jobEmpType', "Unknown")
+                    job_posted_date = job_data.get('jobPostedDate', "Unknown")
+                    
+                    # Create job object
+                    job_entry = {
+                        "Job Title": job_title,
+                        "Job URL": job_url,
+                        "Company": company_name,
+                        "Location": job_location,
+                        "Employment Type": job_employment_type,
+                        "Posted Date": job_posted_date,
+                        "Applied": False
+                    }
+                    
+                    # Apply keyword filtering with reasons for exclusion
+                    include_job = True
+                    exclusion_reason = ""
+                    job_title_lower = job_title.lower()
+                    
+                    # Check exclude keywords
+                    if exclude_keywords and any(keyword.lower() in job_title_lower for keyword in exclude_keywords):
+                        matching_keywords = [kw for kw in exclude_keywords if kw.lower() in job_title_lower]
+                        exclusion_reason = f"Contains excluded keywords: {', '.join(matching_keywords)}"
+                        include_job = False
+                    
+                    # Check include keywords
+                    if include_keywords and not any(keyword.lower() in job_title_lower for keyword in include_keywords):
+                        exclusion_reason = f"Missing required keywords: {', '.join(include_keywords)}"
+                        include_job = False
+                    
+                    if include_job:
+                        included_jobs.append(job_entry)
+                    else:
+                        # Add exclusion reason to the job entry
+                        job_entry["Exclusion Reason"] = exclusion_reason
+                        excluded_jobs.append(job_entry)
+                
+                total_jobs_found += len(job_cards)
+                
+            except Exception as e:
+                print(f"Error processing job cards on page {page}: {str(e)}")
+    
+    except Exception as e:
+        print(f"Error during job fetching: {str(e)}")
+    
+    print(f"Total jobs processed: {total_jobs_found}")
+    print(f"Jobs included after filtering: {len(included_jobs)}")
+    print(f"Jobs excluded after filtering: {len(excluded_jobs)}")
+    
+    return included_jobs, excluded_jobs
+
+
+            
+
+def save_to_excel(job_data, filename="job_application_report.xlsx"):
+    """
+    Saves job data to an Excel file.
+    """
+    try:
+        df = pd.DataFrame(job_data["jobs"])
+        df.to_excel(filename, index=False)
+        print(f"Job application report saved to {filename}")
+    except Exception as e:
+        print(f"Error saving to Excel: {e}")
+
+def main():
+    # Record the start time of the entire script
+    script_start_time = time.time()
+    
+    # Disable PyAutoGUI failsafe to prevent accidental triggering
+    pyautogui.FAILSAFE = False
+    
+    driver = get_web_driver()  # Use browser
+    
+    # Define file names for fresh start
+    applied_jobs_file = "applied_jobs.xlsx"
+    not_applied_jobs_file = "not_applied_jobs.xlsx"
+    job_report_file = "job_application_report.xlsx"
+    excluded_jobs_file = "excluded_jobs.xlsx"
+ 
+    # Delete existing files before login to start fresh (excluding applied_jobs.xlsx)
+    for file in [not_applied_jobs_file, job_report_file, excluded_jobs_file]:
+        if os.path.exists(file):
+            os.remove(file)
+            
+    # Ensure applied_jobs.xlsx exists before writing
+    if not os.path.exists(applied_jobs_file):
+        df_empty = pd.DataFrame(columns=["Job Title", "Job URL", "Company", "Location", "Employment Type", "Posted Date", "Applied"])
+        df_empty.to_excel(applied_jobs_file, index=False)
+
+    job_data = {
+        "Total Jobs Posted Today": 0,
+        "jobs": []
+    }
+
+    try:
+        # Record login start time
+        login_start_time = time.time()
+        
+        if login_to_dice(driver):
+            login_time = time.time() - login_start_time
+            print(f"Login successful in {login_time:.2f} seconds. Starting job search...")
+
+            # Move mouse to prevent system sleeping
+            pyautogui.moveRel(1, 1, duration=0.1)
+            pyautogui.moveRel(-1, -1, duration=0.1)
+
+            # Use existing driver to fetch jobs
+            collected_jobs = {}  # Dictionary to hold unique jobs by URL
+            excluded_jobs = []   # List to hold excluded jobs
+            fetch_start_time = time.time()
+            
+            for query in DICE_SEARCH_QUERIES:
+                # Pass the existing driver to fetch_jobs_with_requests
+                included_jobs, query_excluded_jobs = fetch_jobs_with_requests(driver, query, INCLUDE_KEYWORDS, EXCLUDE_KEYWORDS)
+                
+                # Add each job to the collected jobs dictionary
+                for job in included_jobs:
+                    if job["Job URL"] not in collected_jobs:
+                        collected_jobs[job["Job URL"]] = job
+                
+                # Add to excluded jobs list
+                excluded_jobs.extend(query_excluded_jobs)
+                
+                print(f"Query '{query}' returned {len(included_jobs)} jobs")
+                
+                # Mouse movement between queries to prevent sleep
+                pyautogui.moveRel(1, 1, duration=0.1)
+                pyautogui.moveRel(-1, -1, duration=0.1)
+                
+            fetch_time = time.time() - fetch_start_time
+            print(f"Finished fetching jobs in {fetch_time:.2f} seconds")
+
+            # Save excluded jobs to Excel
+            if excluded_jobs:
+                df_excluded = pd.DataFrame(excluded_jobs)
+                df_excluded.to_excel(excluded_jobs_file, index=False)
+                print(f"Saved {len(excluded_jobs)} excluded jobs to {excluded_jobs_file}")
+
+            # Merge all job details into job_data
+            job_data["jobs"] = list(collected_jobs.values())
+            print(f"==========> Total unique jobs collected from all queries: {len(job_data['jobs'])}")
+            
+            # Rest of your code stays the same...
+            # Check for already applied jobs
+            if not os.path.exists(not_applied_jobs_file):
+                df_empty = pd.DataFrame(columns=["Job Title", "Job URL", "Company", "Location", "Employment Type", "Posted Date", "Applied"])
+                df_empty.to_excel(not_applied_jobs_file, index=False)
+                
+            existing_applied_jobs = set()
+            existing_not_applied_jobs = set()
+
+            if os.path.exists(applied_jobs_file):
+                try:
+                    df_applied = pd.read_excel(applied_jobs_file)
+                    existing_applied_jobs = set(df_applied["Job URL"].dropna())
+                except Exception as e:
+                    print(f"Error loading existing applied jobs: {e}")
+
+            if os.path.exists(not_applied_jobs_file):
+                try:
+                    df_not_applied = pd.read_excel(not_applied_jobs_file)
+                    existing_not_applied_jobs = set(df_not_applied["Job URL"].dropna())
+                except Exception as e:
+                    print(f"Error loading not applied jobs: {e}")
+
+            # Count already applied jobs
+            already_applied_count = sum(1 for job in job_data["jobs"] if job["Job URL"] in existing_applied_jobs)
+            print(f"==========> Skipping jobs that were already applied: {already_applied_count}")
+
+            # Filter jobs before applying
+            pending_jobs = [job for job in job_data["jobs"] if job["Job URL"] not in existing_applied_jobs]
+            print(f"==========> Total jobs to apply for: {len(pending_jobs)}")
+            
+            # Calculate and display the estimated time
+            print(f"==========> Estimated time to apply all {len(pending_jobs)} jobs: {len(pending_jobs)//8//60} hours {len(pending_jobs)//8%60} minutes")
+            
+            # Record application start time
+            apply_start_time = time.time()
+            successful_applications = 0
+            failed_applications = 0
+            
+            # Process only pending jobs
+            for job_index, job in enumerate(pending_jobs):
+                # Move mouse every 3 jobs to prevent system sleeping
+                if job_index % 3 == 0:
+                    pyautogui.moveRel(1, 1, duration=0.1)
+                    pyautogui.moveRel(-1, -1, duration=0.1)
+                
+                job_start_time = time.time()
+                
+                if not job["Applied"] and job["Job URL"] != "Unknown":
+                    applied = apply_to_job_url(driver, job["Job URL"])
+                    job["Applied"] = applied
+                    
+                    job_time = time.time() - job_start_time
+                    
+                    if applied:
+                        successful_applications += 1
+                        try:
+                            df_existing = pd.read_excel(applied_jobs_file)
+                        except Exception:
+                            df_existing = pd.DataFrame(columns=["Job Title", "Job URL", "Company", "Location", "Employment Type", "Posted Date", "Applied"])
+                        df_new = pd.DataFrame([job])
+                        df_combined = pd.concat([df_existing, df_new], ignore_index=True)
+                        df_combined.to_excel(applied_jobs_file, index=False)
+                    else:
+                        failed_applications += 1
+                        try:
+                            df_existing = pd.read_excel(not_applied_jobs_file)
+                        except Exception:
+                            df_existing = pd.DataFrame(columns=["Job Title", "Job URL", "Company", "Location", "Employment Type", "Posted Date", "Applied"])
+                        df_new = pd.DataFrame([job])
+                        df_combined = pd.concat([df_existing, df_new], ignore_index=True)
+                        df_combined.to_excel(not_applied_jobs_file, index=False)
+                    
+                    # Print progress every 5 jobs
+                    if (job_index + 1) % 5 == 0 or job_index == len(pending_jobs) - 1:
+                        elapsed = time.time() - apply_start_time
+                        progress = (job_index + 1) / len(pending_jobs) * 100
+                        estimated_total = elapsed / (job_index + 1) * len(pending_jobs)
+                        remaining = estimated_total - elapsed
+                        
+                        print(f"Progress: {job_index+1}/{len(pending_jobs)} jobs ({progress:.1f}%) | "
+                              f"Last job: {job_time:.1f}s | "
+                              f"Success rate: {successful_applications}/{job_index+1} | "
+                              f"Est. remaining: {remaining/60:.1f} mins")
+
+            apply_time = time.time() - apply_start_time
+            applications_per_minute = (successful_applications + failed_applications) / (apply_time / 60) if apply_time > 0 else 0
+            print(f"\n==========> Application phase completed in {apply_time:.2f} seconds")
+            print(f"==========> Successfully applied: {successful_applications} jobs")
+            print(f"==========> Failed applications: {failed_applications} jobs")
+            print(f"==========> Average application rate: {applications_per_minute:.2f} jobs per minute")
+
+            # Save final data to JSON
+            with open("job_data.json", "w") as json_file:
+                json.dump(job_data, json_file, indent=4)
+            print("Job data saved to job_data.json")
+
+            # Final save to Excel
+            save_to_excel(job_data)
+
+        else:
+            print("Login failed. Exiting...")
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+    finally:
+        pass
+        # Don't close the browser immediately for debugging
+        # driver.quit()
+        
+    # Calculate and print total execution time
+    total_time = time.time() - script_start_time
+    hours, remainder = divmod(total_time, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    
+    print("\n===== EXECUTION TIME SUMMARY =====")
+    print(f"Total script execution time: {int(hours)}h {int(minutes)}m {seconds:.2f}s")
+    if 'pending_jobs' in locals() and pending_jobs:
+        print(f"Average time per job processed: {total_time/len(pending_jobs):.2f} seconds")
+    print("==================================")
+
+
+
+if __name__ == "__main__":
+    # Search in dice
+    DICE_SEARCH_QUERIES = ["AI ML", "Gen AI", "Agentic AI", "Data Engineer", "Data Analyst", "Machine Learning"]  # You can update this list anytime
+
+    # Optional: Define keywords for filtering job applications
+    EXCLUDE_KEYWORDS = ["Manager", "Director",".net", "SAP","java","w2 only","only w2","no c2c",
+        "only on w2","w2 profiles only","tester","f2f"]  # Add more if needed
+    INCLUDE_KEYWORDS = ["AI", "Artificial","Inteligence","Machine","Learning", "ML", "Data", "NLP", "ETL",
+        "Natural Language Processing","analyst","scientist","senior","cloud", 
+        "aws","gcp","Azure","agentic","python","rag","llm"]  # Add more if needed
+
+    start_time = datetime.datetime.now()
+    main()
+    end_time = datetime.datetime.now()
+    print(f"Exact Execution time: {end_time - start_time}")
+
+
+======= Contents of /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/config/settings.json =======
+
+{
+    "search_queries": [
+        "AI ML",
+        "Gen AI",
+        "Agentic AI",
+        "Data Engineer",
+        "Data Analyst",
+        "Machine Learning"
+    ],
+    "exclude_keywords": [
+        "Manager",
+        "Director",
+        ".net",
+        "SAP",
+        "java",
+        "w2 only",
+        "only w2",
+        "no c2c",
+        "only on w2",
+        "w2 profiles only",
+        "tester",
+        "f2f"
+    ],
+    "include_keywords": [
+        "AI",
+        "Artificial",
+        "Inteligence",
+        "Machine",
+        "Learning",
+        "ML",
+        "Data",
+        "NLP",
+        "ETL",
+        "Natural Language Processing",
+        "analyst",
+        "scientist",
+        "senior",
+        "cloud",
+        "aws",
+        "gcp",
+        "Azure",
+        "agentic",
+        "python",
+        "rag",
+        "llm"
+    ],
+    "headless_mode": false,
+    "job_application_limit": 2000
+}
+
+[Skipped] Binary or non-UTF-8 file: /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/resources/app_icon.png
+
+[Skipped] Binary or non-UTF-8 file: /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/resources/app_icon.ico
+
+[Skipped] Binary or non-UTF-8 file: /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/resources/app_icon.icns
+
+
+======= Contents of /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/utils/config_manager.py =======
+
+# dice_auto_apply/utils/config_manager.py
+
+import os
+import json
+from pathlib import Path
+
+class ConfigManager:
+    """Manages application configuration settings."""
+    
+    def __init__(self):
+        """Initialize the configuration manager."""
+        self.config_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config")
+        self.config_file = os.path.join(self.config_dir, "settings.json")
+        self.config = self._load_config()
+        
+    def _load_config(self):
+        """Load configuration from file."""
+        # Ensure config directory exists
+        if not os.path.exists(self.config_dir):
+            os.makedirs(self.config_dir)
+        
+        # Create default config if it doesn't exist
+        if not os.path.exists(self.config_file):
+            default_config = {
+                "search_queries": ["AI ML", "Gen AI", "Agentic AI", "Data Engineer", "Data Analyst", "Machine Learning"],
+                "exclude_keywords": ["Manager", "Director",".net", "SAP","java","w2 only","only w2","no c2c",
+        "only on w2","w2 profiles only","tester","f2f"],
+                "include_keywords": ["AI", "Artificial","Inteligence","Machine","Learning", "ML", "Data", "NLP", "ETL",
+        "Natural Language Processing","analyst","scientist","senior","cloud", 
+        "aws","gcp","Azure","agentic","python","rag","llm"],
+                "headless_mode": False,
+                "job_application_limit": 50,
+                "save_logs": True
+            }
+            
+            # Write default config to file
+            with open(self.config_file, 'w') as f:
+                json.dump(default_config, f, indent=4)
+            
+            return default_config
+        
+        # Load existing config
+        try:
+            with open(self.config_file, 'r') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Error loading config: {e}")
+            return {}
+    
+    def save_config(self):
+        """Save configuration to file."""
+        try:
+            with open(self.config_file, 'w') as f:
+                json.dump(self.config, f, indent=4)
+            return True
+        except Exception as e:
+            print(f"Error saving config: {e}")
+            return False
+    
+    def get(self, key, default=None):
+        """Get a configuration value."""
+        return self.config.get(key, default)
+    
+    def set(self, key, value):
+        """Set a configuration value."""
+        self.config[key] = value
+        self.save_config()
+
+
+
+======= Contents of /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/utils/__init__.py =======
+
+
+
+
+======= Contents of /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/utils/log_manager.py =======
+
+# dice_auto_apply/utils/log_manager.py
+
+import os
+import logging
+from datetime import datetime
+import sys
+
+def setup_logger():
+    """Setup the application logger."""
+    # Create logs directory if it doesn't exist
+    logs_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
+    if not os.path.exists(logs_dir):
+        os.makedirs(logs_dir)
+    
+    # Create log file with date and time in filename
+    log_file = os.path.join(logs_dir, f"app_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+    
+    # Configure the logger
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s [%(levelname)s] %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S',
+        handlers=[
+            logging.FileHandler(log_file),
+            logging.StreamHandler(sys.stdout)
+        ]
+    )
+    
+    # Log application start
+    logging.info("Application started")
+    
+    return logging.getLogger()
+
+def get_logger():
+    """Get the application logger."""
+    return logging.getLogger()
+
+
+
+======= Contents of /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/.git/config =======
+
+[core]
+	repositoryformatversion = 0
+	filemode = true
+	bare = false
+	logallrefupdates = true
+	ignorecase = true
+	precomposeunicode = true
+
+
+
+======= Contents of /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/.git/HEAD =======
+
+ref: refs/heads/main
+
+
+
+======= Contents of /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/.git/description =======
+
+Unnamed repository; edit this file 'description' to name the repository.
+
+
+
+======= Contents of /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/.git/info/exclude =======
+
+# git ls-files --others --exclude-from=.git/info/exclude
+# Lines that start with '#' are comments.
+# For a project mostly in C, the following would be a good set of
+# exclude patterns (uncomment them if you want to use them):
+# *.[oa]
+# *~
+
+
+
+======= Contents of /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/.git/hooks/commit-msg.sample =======
+
+#!/bin/sh
+#
+# An example hook script to check the commit log message.
+# Called by "git commit" with one argument, the name of the file
+# that has the commit message.  The hook should exit with non-zero
+# status after issuing an appropriate message if it wants to stop the
+# commit.  The hook is allowed to edit the commit message file.
+#
+# To enable this hook, rename this file to "commit-msg".
+
+# Uncomment the below to add a Signed-off-by line to the message.
+# Doing this in a hook is a bad idea in general, but the prepare-commit-msg
+# hook is more suited to it.
+#
+# SOB=$(git var GIT_AUTHOR_IDENT | sed -n 's/^\(.*>\).*$/Signed-off-by: \1/p')
+# grep -qs "^$SOB" "$1" || echo "$SOB" >> "$1"
+
+# This example catches duplicate Signed-off-by lines.
+
+test "" = "$(grep '^Signed-off-by: ' "$1" |
+	 sort | uniq -c | sed -e '/^[ 	]*1[ 	]/d')" || {
+	echo >&2 Duplicate Signed-off-by lines.
+	exit 1
+}
+
+
+
+======= Contents of /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/.git/hooks/pre-rebase.sample =======
+
+#!/bin/sh
+#
+# Copyright (c) 2006, 2008 Junio C Hamano
+#
+# The "pre-rebase" hook is run just before "git rebase" starts doing
+# its job, and can prevent the command from running by exiting with
+# non-zero status.
+#
+# The hook is called with the following parameters:
+#
+# $1 -- the upstream the series was forked from.
+# $2 -- the branch being rebased (or empty when rebasing the current branch).
+#
+# This sample shows how to prevent topic branches that are already
+# merged to 'next' branch from getting rebased, because allowing it
+# would result in rebasing already published history.
+
+publish=next
+basebranch="$1"
+if test "$#" = 2
+then
+	topic="refs/heads/$2"
+else
+	topic=`git symbolic-ref HEAD` ||
+	exit 0 ;# we do not interrupt rebasing detached HEAD
+fi
+
+case "$topic" in
+refs/heads/??/*)
+	;;
+*)
+	exit 0 ;# we do not interrupt others.
+	;;
+esac
+
+# Now we are dealing with a topic branch being rebased
+# on top of master.  Is it OK to rebase it?
+
+# Does the topic really exist?
+git show-ref -q "$topic" || {
+	echo >&2 "No such branch $topic"
+	exit 1
+}
+
+# Is topic fully merged to master?
+not_in_master=`git rev-list --pretty=oneline ^master "$topic"`
+if test -z "$not_in_master"
+then
+	echo >&2 "$topic is fully merged to master; better remove it."
+	exit 1 ;# we could allow it, but there is no point.
+fi
+
+# Is topic ever merged to next?  If so you should not be rebasing it.
+only_next_1=`git rev-list ^master "^$topic" ${publish} | sort`
+only_next_2=`git rev-list ^master           ${publish} | sort`
+if test "$only_next_1" = "$only_next_2"
+then
+	not_in_topic=`git rev-list "^$topic" master`
+	if test -z "$not_in_topic"
+	then
+		echo >&2 "$topic is already up to date with master"
+		exit 1 ;# we could allow it, but there is no point.
+	else
+		exit 0
+	fi
+else
+	not_in_next=`git rev-list --pretty=oneline ^${publish} "$topic"`
+	/usr/bin/perl -e '
+		my $topic = $ARGV[0];
+		my $msg = "* $topic has commits already merged to public branch:\n";
+		my (%not_in_next) = map {
+			/^([0-9a-f]+) /;
+			($1 => 1);
+		} split(/\n/, $ARGV[1]);
+		for my $elem (map {
+				/^([0-9a-f]+) (.*)$/;
+				[$1 => $2];
+			} split(/\n/, $ARGV[2])) {
+			if (!exists $not_in_next{$elem->[0]}) {
+				if ($msg) {
+					print STDERR $msg;
+					undef $msg;
+				}
+				print STDERR " $elem->[1]\n";
+			}
+		}
+	' "$topic" "$not_in_next" "$not_in_master"
+	exit 1
+fi
+
+<<\DOC_END
+
+This sample hook safeguards topic branches that have been
+published from being rewound.
+
+The workflow assumed here is:
+
+ * Once a topic branch forks from "master", "master" is never
+   merged into it again (either directly or indirectly).
+
+ * Once a topic branch is fully cooked and merged into "master",
+   it is deleted.  If you need to build on top of it to correct
+   earlier mistakes, a new topic branch is created by forking at
+   the tip of the "master".  This is not strictly necessary, but
+   it makes it easier to keep your history simple.
+
+ * Whenever you need to test or publish your changes to topic
+   branches, merge them into "next" branch.
+
+The script, being an example, hardcodes the publish branch name
+to be "next", but it is trivial to make it configurable via
+$GIT_DIR/config mechanism.
+
+With this workflow, you would want to know:
+
+(1) ... if a topic branch has ever been merged to "next".  Young
+    topic branches can have stupid mistakes you would rather
+    clean up before publishing, and things that have not been
+    merged into other branches can be easily rebased without
+    affecting other people.  But once it is published, you would
+    not want to rewind it.
+
+(2) ... if a topic branch has been fully merged to "master".
+    Then you can delete it.  More importantly, you should not
+    build on top of it -- other people may already want to
+    change things related to the topic as patches against your
+    "master", so if you need further changes, it is better to
+    fork the topic (perhaps with the same name) afresh from the
+    tip of "master".
+
+Let's look at this example:
+
+		   o---o---o---o---o---o---o---o---o---o "next"
+		  /       /           /           /
+		 /   a---a---b A     /           /
+		/   /               /           /
+	       /   /   c---c---c---c B         /
+	      /   /   /             \         /
+	     /   /   /   b---b C     \       /
+	    /   /   /   /             \     /
+    ---o---o---o---o---o---o---o---o---o---o---o "master"
+
+
+A, B and C are topic branches.
+
+ * A has one fix since it was merged up to "next".
+
+ * B has finished.  It has been fully merged up to "master" and "next",
+   and is ready to be deleted.
+
+ * C has not merged to "next" at all.
+
+We would want to allow C to be rebased, refuse A, and encourage
+B to be deleted.
+
+To compute (1):
+
+	git rev-list ^master ^topic next
+	git rev-list ^master        next
+
+	if these match, topic has not merged in next at all.
+
+To compute (2):
+
+	git rev-list master..topic
+
+	if this is empty, it is fully merged to "master".
+
+DOC_END
+
+
+
+======= Contents of /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/.git/hooks/pre-commit.sample =======
+
+#!/bin/sh
+#
+# An example hook script to verify what is about to be committed.
+# Called by "git commit" with no arguments.  The hook should
+# exit with non-zero status after issuing an appropriate message if
+# it wants to stop the commit.
+#
+# To enable this hook, rename this file to "pre-commit".
+
+if git rev-parse --verify HEAD >/dev/null 2>&1
+then
+	against=HEAD
+else
+	# Initial commit: diff against an empty tree object
+	against=$(git hash-object -t tree /dev/null)
+fi
+
+# If you want to allow non-ASCII filenames set this variable to true.
+allownonascii=$(git config --type=bool hooks.allownonascii)
+
+# Redirect output to stderr.
+exec 1>&2
+
+# Cross platform projects tend to avoid non-ASCII filenames; prevent
+# them from being added to the repository. We exploit the fact that the
+# printable range starts at the space character and ends with tilde.
+if [ "$allownonascii" != "true" ] &&
+	# Note that the use of brackets around a tr range is ok here, (it's
+	# even required, for portability to Solaris 10's /usr/bin/tr), since
+	# the square bracket bytes happen to fall in the designated range.
+	test $(git diff --cached --name-only --diff-filter=A -z $against |
+	  LC_ALL=C tr -d '[ -~]\0' | wc -c) != 0
+then
+	cat <<\EOF
+Error: Attempt to add a non-ASCII file name.
+
+This can cause problems if you want to work with people on other platforms.
+
+To be portable it is advisable to rename the file.
+
+If you know what you are doing you can disable this check using:
+
+  git config hooks.allownonascii true
+EOF
+	exit 1
+fi
+
+# If there are whitespace errors, print the offending file names and fail.
+exec git diff-index --check --cached $against --
+
+
+
+======= Contents of /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/.git/hooks/applypatch-msg.sample =======
+
+#!/bin/sh
+#
+# An example hook script to check the commit log message taken by
+# applypatch from an e-mail message.
+#
+# The hook should exit with non-zero status after issuing an
+# appropriate message if it wants to stop the commit.  The hook is
+# allowed to edit the commit message file.
+#
+# To enable this hook, rename this file to "applypatch-msg".
+
+. git-sh-setup
+commitmsg="$(git rev-parse --git-path hooks/commit-msg)"
+test -x "$commitmsg" && exec "$commitmsg" ${1+"$@"}
+:
+
+
+
+======= Contents of /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/.git/hooks/fsmonitor-watchman.sample =======
+
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+use IPC::Open2;
+
+# An example hook script to integrate Watchman
+# (https://facebook.github.io/watchman/) with git to speed up detecting
+# new and modified files.
+#
+# The hook is passed a version (currently 2) and last update token
+# formatted as a string and outputs to stdout a new update token and
+# all files that have been modified since the update token. Paths must
+# be relative to the root of the working tree and separated by a single NUL.
+#
+# To enable this hook, rename this file to "query-watchman" and set
+# 'git config core.fsmonitor .git/hooks/query-watchman'
+#
+my ($version, $last_update_token) = @ARGV;
+
+# Uncomment for debugging
+# print STDERR "$0 $version $last_update_token\n";
+
+# Check the hook interface version
+if ($version ne 2) {
+	die "Unsupported query-fsmonitor hook version '$version'.\n" .
+	    "Falling back to scanning...\n";
+}
+
+my $git_work_tree = get_working_dir();
+
+my $retry = 1;
+
+my $json_pkg;
+eval {
+	require JSON::XS;
+	$json_pkg = "JSON::XS";
+	1;
+} or do {
+	require JSON::PP;
+	$json_pkg = "JSON::PP";
+};
+
+launch_watchman();
+
+sub launch_watchman {
+	my $o = watchman_query();
+	if (is_work_tree_watched($o)) {
+		output_result($o->{clock}, @{$o->{files}});
+	}
+}
+
+sub output_result {
+	my ($clockid, @files) = @_;
+
+	# Uncomment for debugging watchman output
+	# open (my $fh, ">", ".git/watchman-output.out");
+	# binmode $fh, ":utf8";
+	# print $fh "$clockid\n@files\n";
+	# close $fh;
+
+	binmode STDOUT, ":utf8";
+	print $clockid;
+	print "\0";
+	local $, = "\0";
+	print @files;
+}
+
+sub watchman_clock {
+	my $response = qx/watchman clock "$git_work_tree"/;
+	die "Failed to get clock id on '$git_work_tree'.\n" .
+		"Falling back to scanning...\n" if $? != 0;
+
+	return $json_pkg->new->utf8->decode($response);
+}
+
+sub watchman_query {
+	my $pid = open2(\*CHLD_OUT, \*CHLD_IN, 'watchman -j --no-pretty')
+	or die "open2() failed: $!\n" .
+	"Falling back to scanning...\n";
+
+	# In the query expression below we're asking for names of files that
+	# changed since $last_update_token but not from the .git folder.
+	#
+	# To accomplish this, we're using the "since" generator to use the
+	# recency index to select candidate nodes and "fields" to limit the
+	# output to file names only. Then we're using the "expression" term to
+	# further constrain the results.
+	my $last_update_line = "";
+	if (substr($last_update_token, 0, 1) eq "c") {
+		$last_update_token = "\"$last_update_token\"";
+		$last_update_line = qq[\n"since": $last_update_token,];
+	}
+	my $query = <<"	END";
+		["query", "$git_work_tree", {$last_update_line
+			"fields": ["name"],
+			"expression": ["not", ["dirname", ".git"]]
+		}]
+	END
+
+	# Uncomment for debugging the watchman query
+	# open (my $fh, ">", ".git/watchman-query.json");
+	# print $fh $query;
+	# close $fh;
+
+	print CHLD_IN $query;
+	close CHLD_IN;
+	my $response = do {local $/; <CHLD_OUT>};
+
+	# Uncomment for debugging the watch response
+	# open ($fh, ">", ".git/watchman-response.json");
+	# print $fh $response;
+	# close $fh;
+
+	die "Watchman: command returned no output.\n" .
+	"Falling back to scanning...\n" if $response eq "";
+	die "Watchman: command returned invalid output: $response\n" .
+	"Falling back to scanning...\n" unless $response =~ /^\{/;
+
+	return $json_pkg->new->utf8->decode($response);
+}
+
+sub is_work_tree_watched {
+	my ($output) = @_;
+	my $error = $output->{error};
+	if ($retry > 0 and $error and $error =~ m/unable to resolve root .* directory (.*) is not watched/) {
+		$retry--;
+		my $response = qx/watchman watch "$git_work_tree"/;
+		die "Failed to make watchman watch '$git_work_tree'.\n" .
+		    "Falling back to scanning...\n" if $? != 0;
+		$output = $json_pkg->new->utf8->decode($response);
+		$error = $output->{error};
+		die "Watchman: $error.\n" .
+		"Falling back to scanning...\n" if $error;
+
+		# Uncomment for debugging watchman output
+		# open (my $fh, ">", ".git/watchman-output.out");
+		# close $fh;
+
+		# Watchman will always return all files on the first query so
+		# return the fast "everything is dirty" flag to git and do the
+		# Watchman query just to get it over with now so we won't pay
+		# the cost in git to look up each individual file.
+		my $o = watchman_clock();
+		$error = $output->{error};
+
+		die "Watchman: $error.\n" .
+		"Falling back to scanning...\n" if $error;
+
+		output_result($o->{clock}, ("/"));
+		$last_update_token = $o->{clock};
+
+		eval { launch_watchman() };
+		return 0;
+	}
+
+	die "Watchman: $error.\n" .
+	"Falling back to scanning...\n" if $error;
+
+	return 1;
+}
+
+sub get_working_dir {
+	my $working_dir;
+	if ($^O =~ 'msys' || $^O =~ 'cygwin') {
+		$working_dir = Win32::GetCwd();
+		$working_dir =~ tr/\\/\//;
+	} else {
+		require Cwd;
+		$working_dir = Cwd::cwd();
+	}
+
+	return $working_dir;
+}
+
+
+
+======= Contents of /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/.git/hooks/pre-receive.sample =======
+
+#!/bin/sh
+#
+# An example hook script to make use of push options.
+# The example simply echoes all push options that start with 'echoback='
+# and rejects all pushes when the "reject" push option is used.
+#
+# To enable this hook, rename this file to "pre-receive".
+
+if test -n "$GIT_PUSH_OPTION_COUNT"
+then
+	i=0
+	while test "$i" -lt "$GIT_PUSH_OPTION_COUNT"
+	do
+		eval "value=\$GIT_PUSH_OPTION_$i"
+		case "$value" in
+		echoback=*)
+			echo "echo from the pre-receive-hook: ${value#*=}" >&2
+			;;
+		reject)
+			exit 1
+		esac
+		i=$((i + 1))
+	done
+fi
+
+
+
+======= Contents of /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/.git/hooks/prepare-commit-msg.sample =======
+
+#!/bin/sh
+#
+# An example hook script to prepare the commit log message.
+# Called by "git commit" with the name of the file that has the
+# commit message, followed by the description of the commit
+# message's source.  The hook's purpose is to edit the commit
+# message file.  If the hook fails with a non-zero status,
+# the commit is aborted.
+#
+# To enable this hook, rename this file to "prepare-commit-msg".
+
+# This hook includes three examples. The first one removes the
+# "# Please enter the commit message..." help message.
+#
+# The second includes the output of "git diff --name-status -r"
+# into the message, just before the "git status" output.  It is
+# commented because it doesn't cope with --amend or with squashed
+# commits.
+#
+# The third example adds a Signed-off-by line to the message, that can
+# still be edited.  This is rarely a good idea.
+
+COMMIT_MSG_FILE=$1
+COMMIT_SOURCE=$2
+SHA1=$3
+
+/usr/bin/perl -i.bak -ne 'print unless(m/^. Please enter the commit message/..m/^#$/)' "$COMMIT_MSG_FILE"
+
+# case "$COMMIT_SOURCE,$SHA1" in
+#  ,|template,)
+#    /usr/bin/perl -i.bak -pe '
+#       print "\n" . `git diff --cached --name-status -r`
+# 	 if /^#/ && $first++ == 0' "$COMMIT_MSG_FILE" ;;
+#  *) ;;
+# esac
+
+# SOB=$(git var GIT_COMMITTER_IDENT | sed -n 's/^\(.*>\).*$/Signed-off-by: \1/p')
+# git interpret-trailers --in-place --trailer "$SOB" "$COMMIT_MSG_FILE"
+# if test -z "$COMMIT_SOURCE"
+# then
+#   /usr/bin/perl -i.bak -pe 'print "\n" if !$first_line++' "$COMMIT_MSG_FILE"
+# fi
+
+
+
+======= Contents of /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/.git/hooks/post-update.sample =======
+
+#!/bin/sh
+#
+# An example hook script to prepare a packed repository for use over
+# dumb transports.
+#
+# To enable this hook, rename this file to "post-update".
+
+exec git update-server-info
+
+
+
+======= Contents of /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/.git/hooks/pre-merge-commit.sample =======
+
+#!/bin/sh
+#
+# An example hook script to verify what is about to be committed.
+# Called by "git merge" with no arguments.  The hook should
+# exit with non-zero status after issuing an appropriate message to
+# stderr if it wants to stop the merge commit.
+#
+# To enable this hook, rename this file to "pre-merge-commit".
+
+. git-sh-setup
+test -x "$GIT_DIR/hooks/pre-commit" &&
+        exec "$GIT_DIR/hooks/pre-commit"
+:
+
+
+
+======= Contents of /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/.git/hooks/pre-applypatch.sample =======
+
+#!/bin/sh
+#
+# An example hook script to verify what is about to be committed
+# by applypatch from an e-mail message.
+#
+# The hook should exit with non-zero status after issuing an
+# appropriate message if it wants to stop the commit.
+#
+# To enable this hook, rename this file to "pre-applypatch".
+
+. git-sh-setup
+precommit="$(git rev-parse --git-path hooks/pre-commit)"
+test -x "$precommit" && exec "$precommit" ${1+"$@"}
+:
+
+
+
+======= Contents of /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/.git/hooks/pre-push.sample =======
+
+#!/bin/sh
+
+# An example hook script to verify what is about to be pushed.  Called by "git
+# push" after it has checked the remote status, but before anything has been
+# pushed.  If this script exits with a non-zero status nothing will be pushed.
+#
+# This hook is called with the following parameters:
+#
+# $1 -- Name of the remote to which the push is being done
+# $2 -- URL to which the push is being done
+#
+# If pushing without using a named remote those arguments will be equal.
+#
+# Information about the commits which are being pushed is supplied as lines to
+# the standard input in the form:
+#
+#   <local ref> <local oid> <remote ref> <remote oid>
+#
+# This sample shows how to prevent push of commits where the log message starts
+# with "WIP" (work in progress).
+
+remote="$1"
+url="$2"
+
+zero=$(git hash-object --stdin </dev/null | tr '[0-9a-f]' '0')
+
+while read local_ref local_oid remote_ref remote_oid
+do
+	if test "$local_oid" = "$zero"
+	then
+		# Handle delete
+		:
+	else
+		if test "$remote_oid" = "$zero"
+		then
+			# New branch, examine all commits
+			range="$local_oid"
+		else
+			# Update to existing branch, examine new commits
+			range="$remote_oid..$local_oid"
+		fi
+
+		# Check for WIP commit
+		commit=$(git rev-list -n 1 --grep '^WIP' "$range")
+		if test -n "$commit"
+		then
+			echo >&2 "Found WIP commit in $local_ref, not pushing"
+			exit 1
+		fi
+	fi
+done
+
+exit 0
+
+
+
+======= Contents of /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/.git/hooks/update.sample =======
+
+#!/bin/sh
+#
+# An example hook script to block unannotated tags from entering.
+# Called by "git receive-pack" with arguments: refname sha1-old sha1-new
+#
+# To enable this hook, rename this file to "update".
+#
+# Config
+# ------
+# hooks.allowunannotated
+#   This boolean sets whether unannotated tags will be allowed into the
+#   repository.  By default they won't be.
+# hooks.allowdeletetag
+#   This boolean sets whether deleting tags will be allowed in the
+#   repository.  By default they won't be.
+# hooks.allowmodifytag
+#   This boolean sets whether a tag may be modified after creation. By default
+#   it won't be.
+# hooks.allowdeletebranch
+#   This boolean sets whether deleting branches will be allowed in the
+#   repository.  By default they won't be.
+# hooks.denycreatebranch
+#   This boolean sets whether remotely creating branches will be denied
+#   in the repository.  By default this is allowed.
+#
+
+# --- Command line
+refname="$1"
+oldrev="$2"
+newrev="$3"
+
+# --- Safety check
+if [ -z "$GIT_DIR" ]; then
+	echo "Don't run this script from the command line." >&2
+	echo " (if you want, you could supply GIT_DIR then run" >&2
+	echo "  $0 <ref> <oldrev> <newrev>)" >&2
+	exit 1
+fi
+
+if [ -z "$refname" -o -z "$oldrev" -o -z "$newrev" ]; then
+	echo "usage: $0 <ref> <oldrev> <newrev>" >&2
+	exit 1
+fi
+
+# --- Config
+allowunannotated=$(git config --type=bool hooks.allowunannotated)
+allowdeletebranch=$(git config --type=bool hooks.allowdeletebranch)
+denycreatebranch=$(git config --type=bool hooks.denycreatebranch)
+allowdeletetag=$(git config --type=bool hooks.allowdeletetag)
+allowmodifytag=$(git config --type=bool hooks.allowmodifytag)
+
+# check for no description
+projectdesc=$(sed -e '1q' "$GIT_DIR/description")
+case "$projectdesc" in
+"Unnamed repository"* | "")
+	echo "*** Project description file hasn't been set" >&2
+	exit 1
+	;;
+esac
+
+# --- Check types
+# if $newrev is 0000...0000, it's a commit to delete a ref.
+zero=$(git hash-object --stdin </dev/null | tr '[0-9a-f]' '0')
+if [ "$newrev" = "$zero" ]; then
+	newrev_type=delete
+else
+	newrev_type=$(git cat-file -t $newrev)
+fi
+
+case "$refname","$newrev_type" in
+	refs/tags/*,commit)
+		# un-annotated tag
+		short_refname=${refname##refs/tags/}
+		if [ "$allowunannotated" != "true" ]; then
+			echo "*** The un-annotated tag, $short_refname, is not allowed in this repository" >&2
+			echo "*** Use 'git tag [ -a | -s ]' for tags you want to propagate." >&2
+			exit 1
+		fi
+		;;
+	refs/tags/*,delete)
+		# delete tag
+		if [ "$allowdeletetag" != "true" ]; then
+			echo "*** Deleting a tag is not allowed in this repository" >&2
+			exit 1
+		fi
+		;;
+	refs/tags/*,tag)
+		# annotated tag
+		if [ "$allowmodifytag" != "true" ] && git rev-parse $refname > /dev/null 2>&1
+		then
+			echo "*** Tag '$refname' already exists." >&2
+			echo "*** Modifying a tag is not allowed in this repository." >&2
+			exit 1
+		fi
+		;;
+	refs/heads/*,commit)
+		# branch
+		if [ "$oldrev" = "$zero" -a "$denycreatebranch" = "true" ]; then
+			echo "*** Creating a branch is not allowed in this repository" >&2
+			exit 1
+		fi
+		;;
+	refs/heads/*,delete)
+		# delete branch
+		if [ "$allowdeletebranch" != "true" ]; then
+			echo "*** Deleting a branch is not allowed in this repository" >&2
+			exit 1
+		fi
+		;;
+	refs/remotes/*,commit)
+		# tracking branch
+		;;
+	refs/remotes/*,delete)
+		# delete tracking branch
+		if [ "$allowdeletebranch" != "true" ]; then
+			echo "*** Deleting a tracking branch is not allowed in this repository" >&2
+			exit 1
+		fi
+		;;
+	*)
+		# Anything else (is there anything else?)
+		echo "*** Update hook: unknown type of update to ref $refname of type $newrev_type" >&2
+		exit 1
+		;;
+esac
+
+# --- Finished
+exit 0
+
+
+
+======= Contents of /Users/yuvaraj/Desktop/projects/auto_apply_jobs_V3/dice_auto_apply/.git/hooks/push-to-checkout.sample =======
+
+#!/bin/sh
+
+# An example hook script to update a checked-out tree on a git push.
+#
+# This hook is invoked by git-receive-pack(1) when it reacts to git
+# push and updates reference(s) in its repository, and when the push
+# tries to update the branch that is currently checked out and the
+# receive.denyCurrentBranch configuration variable is set to
+# updateInstead.
+#
+# By default, such a push is refused if the working tree and the index
+# of the remote repository has any difference from the currently
+# checked out commit; when both the working tree and the index match
+# the current commit, they are updated to match the newly pushed tip
+# of the branch. This hook is to be used to override the default
+# behaviour; however the code below reimplements the default behaviour
+# as a starting point for convenient modification.
+#
+# The hook receives the commit with which the tip of the current
+# branch is going to be updated:
+commit=$1
+
+# It can exit with a non-zero status to refuse the push (when it does
+# so, it must not modify the index or the working tree).
+die () {
+	echo >&2 "$*"
+	exit 1
+}
+
+# Or it can make any necessary changes to the working tree and to the
+# index to bring them to the desired state when the tip of the current
+# branch is updated to the new commit, and exit with a zero status.
+#
+# For example, the hook can simply run git read-tree -u -m HEAD "$1"
+# in order to emulate git fetch that is run in the reverse direction
+# with git push, as the two-tree form of git read-tree -u -m is
+# essentially the same as git switch or git checkout that switches
+# branches while keeping the local changes in the working tree that do
+# not interfere with the difference between the branches.
+
+# The below is a more-or-less exact translation to shell of the C code
+# for the default behaviour for git's push-to-checkout hook defined in
+# the push_to_deploy() function in builtin/receive-pack.c.
+#
+# Note that the hook will be executed from the repository directory,
+# not from the working tree, so if you want to perform operations on
+# the working tree, you will have to adapt your code accordingly, e.g.
+# by adding "cd .." or using relative paths.
+
+if ! git update-index -q --ignore-submodules --refresh
+then
+	die "Up-to-date check failed"
+fi
+
+if ! git diff-files --quiet --ignore-submodules --
+then
+	die "Working directory has unstaged changes"
+fi
+
+# This is a rough translation of:
+#
+#   head_has_history() ? "HEAD" : EMPTY_TREE_SHA1_HEX
+if git cat-file -e HEAD 2>/dev/null
+then
+	head=HEAD
+else
+	head=$(git hash-object -t tree --stdin </dev/null)
+fi
+
+if ! git diff-index --quiet --cached --ignore-submodules $head --
+then
+	die "Working directory has staged changes"
+fi
+
+if ! git read-tree -u -m "$commit"
+then
+	die "Could not update working tree to new HEAD"
+fi
+
