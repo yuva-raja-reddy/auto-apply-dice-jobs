@@ -46,7 +46,7 @@ def detect_browser_paths():
     
     elif system == "Windows":
         # Get all user profiles 
-        users_dir = os.path.join(os.environ.get("SystemDrive", "C:"), "Users")
+        users_dir = os.path.join(os.environ.get("SystemDrive", "C:"), "\\Users")
         user_folders = [f for f in os.listdir(users_dir) if os.path.isdir(os.path.join(users_dir, f)) 
                         and f not in ["Public", "Default", "Default User", "All Users"]]
         
