@@ -13,6 +13,7 @@ ENV/
 *.xls
 job_data.json
 job_application_summary.json
+*.txt
 
 # Logs
 logs/*.log

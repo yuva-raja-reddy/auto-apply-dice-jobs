@@ -240,7 +240,7 @@ class DiceAutoBotApp:
         
         # Start button with custom style
         style = ttk.Style()
-        style.configure("Green.TButton", background="green", foreground="white", font=("Helvetica", 12, "bold"))
+        style.configure("Green.TButton", background="gray", font=("Helvetica", 12))
         
         self.start_button = ttk.Button(self.main_tab, text="Start Applying", command=self.start_applying, style="Green.TButton")
         self.start_button.pack(fill="x", padx=10, pady=10)
@@ -940,12 +940,12 @@ class LogTextHandler(logging.Handler):
             
         # Schedule the update in the main thread
         self.text_widget.after(0, append_log)
-        
+
 
 def main():
     root = tk.Tk()
     app = DiceAutoBotApp(root)
-    root.protocol("WM_DELETE_WINDOW", root.quit)  # Ensure clean exit
+    root.protocol("WM_DELETE_WINDOW", root.quit)
     root.mainloop()
 
 if __name__ == "__main__":
