@@ -13,13 +13,13 @@ Dice Auto Apply Bot is a Python-based application that automates your job applic
 
 ## Prerequisites
 - Python 3.x installed.
-- A supported web browser (e.g., Chrome, Brave) along with a compatible WebDriver.
+- A supported web browser (e.g., Chrome, Brave).
 - Git (optional) if you wish to clone the repository.
 
 ## Installation
 
 ### Clone the Repository
-Copy and remove the comment markers before running these commands:
+Copy and run these commands:
 
 ```bash
 git clone https://github.com/yuva-raja-reddy/auto-apply-dice-jobs.git
@@ -53,12 +53,6 @@ If your python package doesnt have Tkinter, install using:
 brew install python-tk # for mac
 ```
 
-### Application Settings via the GUI
-1. Run the application (see below) and navigate to the **Settings** tab.
-2. Enter your Dice login credentials and test the connection.
-3. Configure your job search queries, include/exclude keywords, and set the maximum number of applications.
-4. Click **Save Settings** to persist your configuration.
-
 ## Running the Application
 
 Launch the application using the following command after removing the comment markers:
@@ -73,6 +67,13 @@ Once started, the GUI will enable you to:
 - Monitor progress and view real-time logs.
 - Open Excel files containing summaries of applied, not applied, and excluded jobs.
 
+### Application Settings via the GUI
+1. Run the application (see below) and navigate to the **Settings** tab.
+2. Enter your Dice login credentials and test the connection.
+3. Configure your job search queries, include/exclude keywords, and set the maximum number of applications.
+4. Click **Save Settings** to persist your configuration.
+
+
 ## Troubleshooting
 
 - **WebDriver Issues:**  
@@ -82,7 +83,7 @@ Once started, the GUI will enable you to:
   Make sure you are using the correct commands for your operating system.
 
 - **Login Issues:**  
-  Verify that the credentials in your `.env` file and those entered in the GUI settings match your Dice account information.
+  Verify that the credentials entered in the GUI settings match your Dice account information.
 
 ## Contributing
 Feel free to fork this repository and submit pull requests for improvements, additional features, or bug fixes.
