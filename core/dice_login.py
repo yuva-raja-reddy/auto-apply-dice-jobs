@@ -87,6 +87,7 @@ def get_headless_driver():
 def validate_dice_credentials(username, password, headless=True):
     """
     Validates Dice credentials by attempting to log in using a headless browser.
+    With enhanced waiting times for slow login processes.
     
     Parameters:
         username (str): Dice account email/username
@@ -118,7 +119,8 @@ def validate_dice_credentials(username, password, headless=True):
     try:
         # Try login with provided credentials
         driver.get("https://www.dice.com/dashboard/login")
-        wait = WebDriverWait(driver, 10)
+        wait = WebDriverWait(driver, 20)       # Increased from 10 to 20
+        long_wait = WebDriverWait(driver, 120) # Much longer wait for final verification
         
         # Enter email/username
         email_field = wait.until(EC.presence_of_element_located((By.NAME, "email")))
@@ -128,6 +130,7 @@ def validate_dice_credentials(username, password, headless=True):
         # Click continue
         continue_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[@data-testid='sign-in-button']")))
         continue_button.click()
+        time.sleep(3)  # Increased pause
         
         # Enter password
         password_field = wait.until(EC.presence_of_element_located((By.NAME, "password")))
@@ -138,34 +141,49 @@ def validate_dice_credentials(username, password, headless=True):
         login_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[@data-testid='submit-password']")))
         login_button.click()
         
-        # Check for successful login
-        try:
-            # Wait for the search form to appear after successful login
-            long_wait = WebDriverWait(driver, 20)
-            login_success = long_wait.until(EC.presence_of_element_located((By.XPATH, "//form[@class='flex h-auto w-full flex-row rounded-lg rounded-bl-lg bg-white']")))
-            print("Login successful with provided credentials!")
-            result = True
-        except Exception:
-            # Look for error messages
-            try:
-                error_message = wait.until(EC.presence_of_element_located(
-                    (By.XPATH, "//div[contains(@class, 'error-message') or contains(@class, 'alert-danger')]")))
-                print(f"Login failed: {error_message.text}")
-            except Exception:
-                print("Login failed: Could not verify login result")
-            result = False
-            
-        return result
+        # Add a longer pause after clicking login
+        time.sleep(10)  # Increased wait time
         
+        # Check for successful login using multiple methods
+        try:
+            # Method 1: Check for search form
+            long_wait.until(EC.presence_of_element_located((By.XPATH, "//form[@class='flex h-auto w-full flex-row rounded-lg rounded-bl-lg bg-white']")))
+            print("Login successful with provided credentials!")
+            return True
+        except Exception:
+            try:
+                # Method 2: Check for dashboard header
+                long_wait.until(EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'dashboard-header')]")))
+                print("Login successful with provided credentials!")
+                return True
+            except Exception:
+                # Method 3: Check URL change
+                current_url = driver.current_url
+                if "dashboard" in current_url or "/home" in current_url or "/jobs" in current_url:
+                    print("Login successful with provided credentials!")
+                    return True
+                
+                # Look for error messages
+                try:
+                    error_message = wait.until(EC.presence_of_element_located(
+                        (By.XPATH, "//div[contains(@class, 'error-message') or contains(@class, 'alert-danger')]")))
+                    print(f"Login failed: {error_message.text}")
+                except Exception:
+                    print("Login failed: Could not verify login result")
+                
+                return False
+            
     except Exception as e:
         print(f"Error validating credentials: {e}")
         return False
     finally:
         driver.quit()
 
+
 def login_to_dice(driver, credentials_from_params=None):
     """
     Logs into Dice using credentials from the .env file or provided parameters.
+    With enhanced waiting and retry logic for slow login processes.
     
     Parameters:
         driver (selenium.webdriver): Selenium WebDriver instance.
@@ -186,33 +204,83 @@ def login_to_dice(driver, credentials_from_params=None):
     if not username or not password:
         raise Exception("Dice credentials not found. Please set DICE_USERNAME and DICE_PASSWORD in .env file or provide them as parameters.")
     
+    # Navigate to login page
+    print("Navigating to Dice login page...")
     driver.get("https://www.dice.com/dashboard/login")
-    wait = WebDriverWait(driver, 10)
+    
+    # Set up wait objects with increased timeouts
+    short_wait = WebDriverWait(driver, 20)  # Increased timeout
+    long_wait = WebDriverWait(driver, 120)  # Much longer timeout for final step
 
     try:
-        email_field = wait.until(EC.presence_of_element_located((By.NAME, "email")))
+        # Enter email/username
+        print("Entering username...")
+        email_field = short_wait.until(EC.presence_of_element_located((By.NAME, "email")))
         email_field.clear()
         email_field.send_keys(username)
 
-        continue_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[@data-testid='sign-in-button']")))
+        # Click continue button
+        print("Clicking continue button...")
+        continue_button = short_wait.until(EC.element_to_be_clickable((By.XPATH, "//button[@data-testid='sign-in-button']")))
         continue_button.click()
+        time.sleep(3)  # Increased pause to ensure page transitions
 
-        password_field = wait.until(EC.presence_of_element_located((By.NAME, "password")))
+        # Enter password
+        print("Entering password...")
+        password_field = short_wait.until(EC.presence_of_element_located((By.NAME, "password")))
         password_field.clear()
         password_field.send_keys(password)
 
-        login_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[@data-testid='submit-password']")))
+        # Click login button
+        print("Clicking login button...")
+        login_button = short_wait.until(EC.element_to_be_clickable((By.XPATH, "//button[@data-testid='submit-password']")))
         login_button.click()
+        
+        # Add a longer pause after clicking login
+        print("Waiting for login to complete (this may take some time)...")
+        time.sleep(10)  # Increased wait time after login click
 
-        # Use a longer wait time (20 seconds) for the final step
-        long_wait = WebDriverWait(driver, 20)
-        long_wait.until(EC.presence_of_element_located((By.XPATH, "//form[@class='flex h-auto w-full flex-row rounded-lg rounded-bl-lg bg-white']")))
-        print("Login successful!")
-        return True
+        # Wait for successful login with multiple verification methods
+        print("Verifying login success...")
+        try:
+            # Method 1: Check for the search form
+            long_wait.until(EC.presence_of_element_located((By.XPATH, "//form[@class='flex h-auto w-full flex-row rounded-lg rounded-bl-lg bg-white']")))
+            print("Login verified by search form presence!")
+            return True
+        except Exception as e1:
+            print(f"Primary verification method failed: {e1}")
+            try:
+                # Method 2: Check for any element that would only appear after login
+                long_wait.until(EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'dashboard-header')]")))
+                print("Login verified by dashboard header presence!")
+                return True
+            except Exception as e2:
+                print(f"Secondary verification method failed: {e2}")
+                try:
+                    # Method 3: Check if URL changed to something that indicates successful login
+                    current_url = driver.current_url
+                    if "dashboard" in current_url or "/home" in current_url or "/jobs" in current_url:
+                        print(f"Login verified by URL change to: {current_url}")
+                        return True
+                    else:
+                        print(f"Login verification failed - current URL: {current_url}")
+                        # One last attempt - check if any job-related content is visible
+                        try:
+                            if driver.find_element(By.XPATH, "//div[contains(@class, 'job-cards')]") or \
+                               driver.find_element(By.XPATH, "//div[contains(@class, 'search-results')]"):
+                                print("Login verified by presence of job-related content!")
+                                return True
+                        except:
+                            pass
+                        return False
+                except Exception as e3:
+                    print(f"URL verification method failed: {e3}")
+                    return False
 
     except Exception as e:
-        print("Login failed:", e)
+        print(f"Login process failed: {e}")
         return False
+
 
 def setup_credentials_interactive(headless=True):
     """

@@ -1,11 +1,11 @@
 {
     "search_queries": [
-        "AI ML",
-        "Gen AI",
-        "Agentic AI",
         "Data Engineer",
         "Data Analyst",
-        "Machine Learning"
+        "Machine Learning",
+        "AI ML",
+        "Gen AI",
+        "Agentic AI"
     ],
     "exclude_keywords": [
         "Manager",

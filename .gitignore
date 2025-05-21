@@ -27,3 +27,4 @@ logs/*.log
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+code_reader.py

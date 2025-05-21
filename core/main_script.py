@@ -310,35 +310,36 @@ def apply_to_job_url(driver, job_url):
 
 def fetch_jobs_with_requests(driver, search_query, include_keywords=None, exclude_keywords=None):
     """
-    Use the existing browser instance to fetch job listings, preventing focus stealing
-    and including mouse movements to prevent system sleeping.
-    
-    Returns:
-        tuple: (included_jobs_list, excluded_jobs_list) - Lists of jobs that match and don't match criteria
+    Use the existing browser instance to fetch job listings.
     """
     print(f"Fetching jobs for query: {search_query}")
     
     # Format search parameters for URL
     encoded_query = quote(search_query)
     
-    # Construct the URL with all filters already applied
-    base_url = f"https://www.dice.com/jobs?q={encoded_query}&countryCode=US&radius=30&radiusUnit=mi&page=1&pageSize=100&filters.postedDate=ONE&filters.employmentType=CONTRACTS&language=en"
+    # Updated URL structure
+    base_url = f"https://www.dice.com/jobs?filters.employmentType=CONTRACTS&filters.postedDate=ONE&q={encoded_query}"
     
     included_jobs = []
-    excluded_jobs = []  # Track excluded jobs with reason
+    excluded_jobs = []
     total_jobs_found = 0
     
+    # Create WebDriverWait objects with different timeout values
+    short_wait = WebDriverWait(driver, 20)
+    medium_wait = WebDriverWait(driver, 60)  # Increased timeout for slow loading
+    
     try:
-        # First load the initial page to get total job count
+        # First load the initial page
         max_retries = 3
         for attempt in range(max_retries):
             try:
+                print(f"Loading search results for query: '{search_query}'...")
                 driver.get(base_url)
+                short_wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
                 break
             except Exception as e:
                 if attempt < max_retries - 1:
                     print(f"Error loading initial page. Retry {attempt+1}/{max_retries}...")
-                    time.sleep(2)
                 else:
                     print(f"Failed to load initial page after {max_retries} attempts.")
                     raise e
@@ -347,107 +348,65 @@ def fetch_jobs_with_requests(driver, search_query, include_keywords=None, exclud
         pyautogui.moveRel(1, 1, duration=0.1)
         pyautogui.moveRel(-1, -1, duration=0.1)
         
-        wait = WebDriverWait(driver, 20)  # Increased timeout
-        
-        # Wait for the page to load completely
-        wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-        time.sleep(3)  # Extra wait for dynamic content
-        
-        # Get total jobs from the job count element
+        # Get total jobs count
         total_pages = 1
         try:
-            # First try explicit wait for the element
-            job_count_element = wait.until(EC.presence_of_element_located((By.ID, "totalJobCount")))
-            # Additional JavaScript check to ensure element is visible and has text
-            total_jobs_text = driver.execute_script("""
-                const element = document.getElementById('totalJobCount');
-                if (element && element.innerText.trim()) {
-                    return element.innerText.trim();
-                }
-                return '0';
-            """)
+            print("Looking for job count element...")
             
-            total_jobs_text = total_jobs_text.replace(",", "")
-            total_jobs = int(total_jobs_text)
-            print(f"Total jobs for query '{search_query}': {total_jobs}")
+            # Wait for the job count element with flexibility in the class name
+            job_count_element = medium_wait.until(
+                EC.presence_of_element_located((By.XPATH, "//p[contains(@class, 'text-neutral-900') and contains(text(), 'results')]"))
+            )
             
-            # Calculate total pages needed (100 jobs per page)
-            jobs_per_page = 100
-            total_pages = min(11, (total_jobs + jobs_per_page - 1) // jobs_per_page)  # Ceiling division, max 11 pages
-            print(f"Will process {total_pages} pages ({jobs_per_page} jobs per page)")
+            total_jobs_text = job_count_element.text
+            print(f"Found job count text: '{total_jobs_text}'")
+            
+            total_jobs_match = re.search(r'(\d+)\s+results', total_jobs_text)
+            
+            if total_jobs_match:
+                total_jobs = int(total_jobs_match.group(1))
+                print(f"Total jobs for query '{search_query}': {total_jobs}")
+                
+                # 20 jobs per page
+                jobs_per_page = 20
+                total_pages = min(11, (total_jobs + jobs_per_page - 1) // jobs_per_page)
+                print(f"Will process {total_pages} pages ({jobs_per_page} jobs per page)")
+            else:
+                print(f"Could not extract job count from: {total_jobs_text}")
+                total_pages = 3  # Default to 3 pages
             
         except Exception as e:
             print(f"Could not find total job count, defaulting to 3 pages: {str(e)}")
-            total_jobs = 0
-            total_pages = 3  # Default to 3 pages if we can't determine the count
+            total_pages = 3
         
-        # Process each page based on calculated total
+        # Process each page
         for page in range(1, total_pages + 1):
-            # Move mouse to prevent system sleeping
-            pyautogui.moveRel(1, 1, duration=0.1)
-            pyautogui.moveRel(-1, -1, duration=0.1)
+            current_url = base_url if page == 1 else f"{base_url}&page={page}"
+            print(f"Processing page {page}/{total_pages}: {current_url}")
             
-            # Construct URL for current page
-            current_url = base_url.replace("page=1", f"page={page}")
-            print(f"Processing page {page}/{total_pages}")
-            
-            # Retry mechanism for loading each page
-            page_load_success = False
-            for retry in range(max_retries):
+            if page > 1:  # Only need to navigate if not on first page
                 try:
-                    # Navigate to the page with timeout handling
                     driver.get(current_url)
-                    
-                    # Wait for job cards or error indication to appear
-                    try:
-                        # Wait longer for pages after page 3 (which seem problematic)
-                        wait_time = 25 if page > 3 else 15
-                        
-                        # Wait for either job cards OR an indication there are no results
-                        job_cards_present = driver.execute_script("""
-                            return new Promise(resolve => {
-                                const checkForElements = () => {
-                                    const cards = document.querySelectorAll('dhi-search-card');
-                                    const noResults = document.querySelector('.no-results-container');
-                                    if (cards && cards.length > 0) {
-                                        resolve(true);
-                                    } else if (noResults) {
-                                        resolve(false);
-                                    } else {
-                                        setTimeout(checkForElements, 500);
-                                    }
-                                };
-                                checkForElements();
-                            });
-                        """)
-                        
-                        if not job_cards_present:
-                            print(f"No job cards found on page {page} (confirmed by page)")
-                            break
-                            
-                        page_load_success = True
-                        break
-                    except Exception:
-                        if retry < max_retries - 1:
-                            print(f"Waiting for job cards failed on page {page}. Retry {retry+1}/{max_retries}...")
-                            time.sleep(2)
-                        else:
-                            print(f"Could not find job cards on page {page} after {max_retries} attempts.")
-                
+                    short_wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
                 except Exception as e:
-                    if retry < max_retries - 1:
-                        print(f"Error loading page {page}. Retry {retry+1}/{max_retries}...")
-                        time.sleep(3)
-                    else:
-                        print(f"Failed to load page {page} after {max_retries} attempts. Error: {str(e)}")
+                    print(f"Error loading page {page}: {e}")
+                    continue
             
-            if not page_load_success:
-                print(f"Skipping page {page} due to load failures.")
-                continue
-            
-            # Find all job cards
+            # Wait for job cards to appear with a more specific selector based on example
             try:
-                job_cards = driver.find_elements(By.CSS_SELECTOR, "dhi-search-card")
+                print("Waiting for job cards to load...")
+                
+                # NEW APPROACH: Wait specifically for job cards using data attributes
+                medium_wait.until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "div[data-id][data-job-guid]"))
+                )
+                
+                # Add a small delay to ensure dynamic content is fully rendered
+                time.sleep(2)
+                
+                # Get all job cards using the data-id and data-job-guid attributes
+                job_cards = driver.find_elements(By.CSS_SELECTOR, "div[data-id][data-job-guid]")
+                
                 if not job_cards:
                     print(f"No job cards found on page {page}")
                     continue
@@ -456,100 +415,102 @@ def fetch_jobs_with_requests(driver, search_query, include_keywords=None, exclud
                 
                 # Process each job card
                 for card_index, card in enumerate(job_cards):
-                    # Extract job details using JavaScript
-                    job_data = driver.execute_script("""
-                        const card = arguments[0];
+                    try:
+                        # Get job ID and URL from data attributes
+                        job_id = card.get_attribute('data-id')
+                        job_guid = card.get_attribute('data-job-guid') 
+                        if not job_guid:
+                            print(f"Missing job_guid on card {card_index}")
+                            continue
+                            
+                        job_url = f"https://www.dice.com/job-detail/{job_guid}"
                         
-                        try {
-                            // Get job title and URL
-                            const titleElement = card.querySelector("a[data-cy='card-title-link']");
-                            const jobTitle = titleElement ? titleElement.textContent.trim() : "Unknown";
-                            const jobId = titleElement ? titleElement.id : null;
-                            const jobUrl = jobId ? `https://www.dice.com/job-detail/${jobId}` : "Unknown";
-                            
-                            // Get company
-                            const company = card.querySelector("a[data-cy='search-result-company-name']");
-                            const companyName = company ? company.textContent.trim() : "Unknown";
-                            
-                            // Get location
-                            const location = card.querySelector("span[data-cy='search-result-location']");
-                            const jobLocation = location ? location.textContent.trim() : "Unknown";
-                            
-                            // Get employment type
-                            const empType = card.querySelector("span[data-cy='search-result-employment-type']");
-                            const jobEmpType = empType ? empType.textContent.trim() : "Unknown";
-                            
-                            // Get posted date
-                            const posted = card.querySelector("span[data-cy='card-posted-date']");
-                            const jobPostedDate = posted ? posted.textContent.trim() : "Unknown";
-                            
-                            return {
-                                jobTitle,
-                                jobUrl,
-                                companyName,
-                                jobLocation,
-                                jobEmpType,
-                                jobPostedDate,
-                                error: null
-                            };
-                        } catch (err) {
-                            return {
-                                error: err.toString(),
-                                html: card.innerHTML.substring(0, 200) + "..."
-                            };
+                        # Extract job title - using the exact classes from example
+                        job_title_element = card.find_element(
+                            By.CSS_SELECTOR, 
+                            "a[data-testid='job-search-job-detail-link']"
+                        )
+                        job_title = job_title_element.text.strip() if job_title_element else "Unknown"
+                        
+                        # Extract company name - using the exact structure from example
+                        company_element = card.find_element(
+                            By.CSS_SELECTOR, 
+                            "a[href*='company-profile'] p"
+                        )
+                        company_name = company_element.text.strip() if company_element else "Unknown"
+                        
+                        # Extract location - first text paragraph with the specified class
+                        location_elements = card.find_elements(
+                            By.CSS_SELECTOR, 
+                            "p.text-sm.font-normal.text-zinc-600"
+                        )
+                        job_location = location_elements[0].text.strip() if location_elements else "Unknown"
+                        
+                        # Extract employment type from the box with specific ID
+                        job_employment_type = "Contract"  # Default since we're filtering for contracts
+                        try:
+                            emp_type_element = card.find_element(
+                                By.CSS_SELECTOR, 
+                                "p#employmentType-label"
+                            )
+                            if emp_type_element:
+                                job_employment_type = emp_type_element.text.strip()
+                        except:
+                            # Fallback: look for any box containing "Contract"
+                            try:
+                                box_elements = card.find_elements(By.CSS_SELECTOR, "div.box p")
+                                for element in box_elements:
+                                    if "Contract" in element.text:
+                                        job_employment_type = element.text.strip()
+                                        break
+                            except:
+                                pass
+                        
+                        # Posted date is always "Today" since we filter for last 24 hours
+                        job_posted_date = "Today"
+                        
+                        # Create job entry
+                        job_entry = {
+                            "Job Title": job_title,
+                            "Job URL": job_url,
+                            "Company": company_name,
+                            "Location": job_location,
+                            "Employment Type": job_employment_type,
+                            "Posted Date": job_posted_date,
+                            "Applied": False
                         }
-                    """, card)
-                    
-                    # Skip if error in extraction
-                    if job_data.get('error'):
-                        continue
                         
-                    job_title = job_data.get('jobTitle', "Unknown")
-                    job_url = job_data.get('jobUrl', "Unknown")
-                    company_name = job_data.get('companyName', "Unknown")
-                    job_location = job_data.get('jobLocation', "Unknown")
-                    job_employment_type = job_data.get('jobEmpType', "Unknown")
-                    job_posted_date = job_data.get('jobPostedDate', "Unknown")
+                        # Apply filtering
+                        include_job = True
+                        exclusion_reason = ""
+                        job_title_lower = job_title.lower()
+                        
+                        # Check exclude keywords
+                        if exclude_keywords and any(keyword.lower() in job_title_lower for keyword in exclude_keywords):
+                            matching_keywords = [kw for kw in exclude_keywords if kw.lower() in job_title_lower]
+                            exclusion_reason = f"Contains excluded keywords: {', '.join(matching_keywords)}"
+                            include_job = False
+                        
+                        # Check include keywords
+                        if include_keywords and not any(keyword.lower() in job_title_lower for keyword in include_keywords):
+                            exclusion_reason = f"Missing required keywords: {', '.join(include_keywords)}"
+                            include_job = False
+                        
+                        if include_job:
+                            included_jobs.append(job_entry)
+                        else:
+                            job_entry["Exclusion Reason"] = exclusion_reason
+                            excluded_jobs.append(job_entry)
                     
-                    # Create job object
-                    job_entry = {
-                        "Job Title": job_title,
-                        "Job URL": job_url,
-                        "Company": company_name,
-                        "Location": job_location,
-                        "Employment Type": job_employment_type,
-                        "Posted Date": job_posted_date,
-                        "Applied": False
-                    }
-                    
-                    # Apply keyword filtering with reasons for exclusion
-                    include_job = True
-                    exclusion_reason = ""
-                    job_title_lower = job_title.lower()
-                    
-                    # Check exclude keywords
-                    if exclude_keywords and any(keyword.lower() in job_title_lower for keyword in exclude_keywords):
-                        matching_keywords = [kw for kw in exclude_keywords if kw.lower() in job_title_lower]
-                        exclusion_reason = f"Contains excluded keywords: {', '.join(matching_keywords)}"
-                        include_job = False
-                    
-                    # Check include keywords
-                    if include_keywords and not any(keyword.lower() in job_title_lower for keyword in include_keywords):
-                        exclusion_reason = f"Missing required keywords: {', '.join(include_keywords)}"
-                        include_job = False
-                    
-                    if include_job:
-                        included_jobs.append(job_entry)
-                    else:
-                        # Add exclusion reason to the job entry
-                        job_entry["Exclusion Reason"] = exclusion_reason
-                        excluded_jobs.append(job_entry)
+                    except Exception as e:
+                        print(f"Error processing job card {card_index} on page {page}: {str(e)}")
+                        continue
                 
                 total_jobs_found += len(job_cards)
                 
             except Exception as e:
                 print(f"Error processing job cards on page {page}: {str(e)}")
-    
+                
     except Exception as e:
         print(f"Error during job fetching: {str(e)}")
     
