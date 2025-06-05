@@ -46,6 +46,25 @@ def get_web_driver(headless=False, retry_with_alternative=True):
     Returns:
         WebDriver: Initialized WebDriver instance
     """
+    # Fix ChromeDriver permissions first
+    try:
+        # Import fix_chromedriver
+        import sys
+        import os
+        
+        # Add the parent directory to the path to find fix_chromedriver
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        parent_dir = os.path.dirname(script_dir)
+        if parent_dir not in sys.path:
+            sys.path.insert(0, parent_dir)
+            
+        # Run fix_chromedriver
+        from fix_chromedriver import fix_chromedriver_permissions
+        fix_chromedriver_permissions()
+    except Exception as e:
+        print(f"Warning: Could not fix ChromeDriver permissions: {e}")
+
+
     import platform  # Add this import for system detection
     
     # Get browser path from .env or detect it
