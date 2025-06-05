@@ -9,6 +9,14 @@ Dice Auto Apply Bot is a Python-based application that automates your job applic
 - **Customizable Configuration:** Set job search queries, include/exclude keywords, and configure job application limits.
 - **Logging and Reporting:** Detailed logs and Excel outputs for applied, not applied, and excluded jobs.
 
+## Demo Video
+
+Watch a complete demonstration of how to set up and use the Dice Auto Apply Bot:
+
+[![Watch the Demo Video](https://img.shields.io/badge/Watch-Demo_Video-red?style=for-the-badge&logo=google-drive&logoColor=white)](https://drive.google.com/file/d/1c0Y69PZ5UlFb3dZg0_-_wn7UibRQQwlW/view?usp=sharing)
+
+The video shows step-by-step instructions for installation, configuration, and running the application on both Windows and Mac.
+
 ## Prerequisites
 - Python 3.x installed.
 - A web browser (preferably Brave Browser, but Chrome, Firefox, Edge or Safari will also work).
