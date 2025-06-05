@@ -1,19 +1,17 @@
 # Dice Auto Apply Bot
 
-[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/yuvarajareddy)
-
 Dice Auto Apply Bot is a Python-based application that automates your job application process on Dice.com. It leverages Selenium for web automation, BeautifulSoup for HTML parsing, and Tkinter for a user-friendly GUI.
 
 ## Features
 - **Automated Job Search & Application:** Automatically search for and apply to job listings using specified queries and filters.
 - **Graphical User Interface:** Tkinter-based UI for easy control and monitoring of the application process.
-- **Cross-Platform Support:** Instructions provided for both Windows and macOS (or Linux) users.
+- **Cross-Platform Support:** Works on both Windows and macOS/Linux systems.
 - **Customizable Configuration:** Set job search queries, include/exclude keywords, and configure job application limits.
-- **Logging and Reporting:** Detailed logs are maintained alongside Excel outputs for applied, not applied, and excluded jobs.
+- **Logging and Reporting:** Detailed logs and Excel outputs for applied, not applied, and excluded jobs.
 
 ## Prerequisites
 - Python 3.x installed.
-- A supported web browser (e.g., Chrome, Brave).
+- A web browser (preferably Brave Browser, but Chrome, Firefox, Edge or Safari will also work).
 - Git (optional) if you wish to clone the repository.
 
 ## Installation
@@ -47,43 +45,79 @@ After activating your virtual environment, install the required packages:
 pip install -r requirements.txt
 ```
 
-If your python package doesnt have Tkinter, install using:
+If your Python installation doesn't include Tkinter, install it using:
 
 ```bash
-brew install python-tk # for mac
+# For macOS
+brew install python-tk
+
+# For Ubuntu/Debian
+sudo apt-get install python3-tk
 ```
 
 ## Running the Application
 
-Launch the application using the following command after removing the comment markers:
-
+### For Windows
 ```bash
+# Using the run script
+python run.py
+
+# Or directly
 python app_tkinter.py
 ```
 
-Once started, the GUI will enable you to:
+### For macOS / Linux
+```bash
+# Using the run script (recommended)
+python3 run.py
+
+# Or directly
+python3 app_tkinter.py
+
+# If you encounter permission issues with chromedriver
+chmod +x run.py
+./run.py
+```
+
+The run.py script automatically handles chromedriver permissions, which is particularly helpful for macOS users.
+
+## Browser Configuration
+
+The application will automatically detect your installed browsers in this preference order:
+1. Brave Browser (recommended)
+2. Google Chrome
+3. Safari (macOS only)
+4. Microsoft Edge
+5. Firefox
+
+If Brave Browser is installed, it will be used by default. If not, the application will fall back to the next available browser in the preference list.
+
+## Using the Application
+
+Once started, the GUI allows you to:
 - Test your Dice login credentials.
-- Initiate the automated job application process.
+- Configure job search queries and keywords.
+- Start the automated job application process.
 - Monitor progress and view real-time logs.
-- Open Excel files containing summaries of applied, not applied, and excluded jobs.
+- Access Excel files with summaries of applied, not applied, and excluded jobs.
 
 ### Application Settings via the GUI
-1. Run the application (see below) and navigate to the **Settings** tab.
+1. Navigate to the **Settings** tab.
 2. Enter your Dice login credentials and test the connection.
 3. Configure your job search queries, include/exclude keywords, and set the maximum number of applications.
 4. Click **Save Settings** to persist your configuration.
-
+5. Return to the **Run Bot** tab to start applying.
 
 ## Troubleshooting
 
+- **Slow Login Issues:**  
+  The application has been updated to handle slower login processes. If you still experience issues, try increasing timeouts in the settings.
+
 - **WebDriver Issues:**  
-  Ensure your browser and its corresponding WebDriver are up to date. This project uses `webdriver_manager` to help manage drivers automatically.
+  The application uses `webdriver_manager` to handle drivers automatically. If you encounter issues, try running `run.py` which fixes common permission issues.
 
-- **Virtual Environment Problems:**  
-  Make sure you are using the correct commands for your operating system.
-
-- **Login Issues:**  
-  Verify that the credentials entered in the GUI settings match your Dice account information.
+- **Browser Detection Problems:**  
+  If your browser isn't being detected correctly, you can manually specify the browser path in the .env file.
 
 ## Contributing
 Feel free to fork this repository and submit pull requests for improvements, additional features, or bug fixes.
