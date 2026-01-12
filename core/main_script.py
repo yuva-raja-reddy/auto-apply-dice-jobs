@@ -195,7 +195,8 @@ def apply_to_job_url(driver, job_url):
     # Navigate to job URL in the same tab
     driver.get(job_url)
     
-    wait = WebDriverWait(driver, 10)
+    # Dice pages can be slow/heavy; give a bit more time for the apply control to become interactable
+    wait = WebDriverWait(driver, 20)
     applied = False
     
     # move pointer to prevent sleeping
@@ -205,110 +206,224 @@ def apply_to_job_url(driver, job_url):
     try:
         # First wait for #applyButton to be present in the DOM
         wait.until(EC.presence_of_element_located((By.ID, "applyButton")))
-        
-        # Wait and continuously poll for text in shadow DOM with a timeout
-        max_attempts = 10
-        shadow_content_found = False
-        
-        for attempt in range(max_attempts):
-            # Check for existence of either "Application Submitted" or "Easy apply" text
-            shadow_check = driver.execute_script("""
-                // Get the apply-button-wc element
-                const applyButtonWc = document.querySelector('apply-button-wc');
-                if (!applyButtonWc) return { found: false, message: 'No apply-button-wc found' };
-                
-                // Wait for shadow root
-                const shadowRoot = applyButtonWc.shadowRoot;
-                if (!shadowRoot) return { found: false, message: 'No shadow root found' };
-                
-                // Get all text content from the shadow DOM
-                const shadowText = shadowRoot.textContent || '';
-                
-                // Check for specific text content
-                if (shadowText.includes('Application Submitted')) {
-                    return { found: true, status: 'already_applied', message: 'Application Submitted text found' };
-                } else if (shadowText.includes('Easy apply')) {
-                    return { found: true, status: 'can_apply', message: 'Easy apply text found' };
+
+        # Dice has shipped multiple variants of the "Easy Apply" control over time:
+        # - Newer: a normal <a data-testid="apply-button">Easy Apply</a> inside #applyButton (no shadow DOM)
+        # - Older: <apply-button-wc> web component with the button in a shadow root
+        #
+        # We poll a few times because the header area can hydrate late.
+        # Poll until the apply control has hydrated to a meaningful state (text/href),
+        # otherwise we can mis-classify too early.
+        max_attempts = 30
+        status = None
+        apply_kind = None
+
+        for _ in range(max_attempts):
+            apply_check = driver.execute_script("""
+                // Newer Dice DOM: plain anchor link
+                const applyLink = document.querySelector('#applyButton a[data-testid="apply-button"]');
+                if (applyLink) {
+                    const text = (applyLink.textContent || '').trim();
+                    const ariaDisabled = applyLink.getAttribute('aria-disabled');
+                    const href = applyLink.getAttribute('href') || '';
+                    return { found: true, kind: 'anchor', text, ariaDisabled, href };
                 }
-                
-                return { found: false, message: 'No relevant text found in shadow DOM' };
+
+                // Older Dice DOM: shadow DOM web component
+                const applyButtonWc = document.querySelector('apply-button-wc');
+                if (applyButtonWc && applyButtonWc.shadowRoot) {
+                    const shadowText = applyButtonWc.shadowRoot.textContent || '';
+                    if (shadowText.includes('Application Submitted')) {
+                        return { found: true, kind: 'shadow', status: 'already_applied' };
+                    }
+                    // Some variants use "Easy Apply" / "Easy apply"
+                    if ((shadowText || '').toLowerCase().includes('easy apply')) {
+                        return { found: true, kind: 'shadow', status: 'can_apply' };
+                    }
+                    return { found: true, kind: 'shadow', status: 'unknown' };
+                }
+
+                return { found: false };
             """)
-            
-            if shadow_check.get('found', False):
-                shadow_content_found = True
-                status = shadow_check.get('status', 'unknown')
-                message = shadow_check.get('message', '')
-                # print(f"Shadow DOM content found: {status} - {message}")
-                break
-            
-            # If not found, wait and try again
+
+            if apply_check and apply_check.get("found"):
+                apply_kind = apply_check.get("kind")
+
+                if apply_kind == "anchor":
+                    # IMPORTANT:
+                    # - Do NOT treat aria-disabled as "already applied" (Dice may disable temporarily / for other reasons)
+                    # - If the anchor exists but text/href isn't ready yet, keep polling instead of deciding early.
+                    text = (apply_check.get("text") or "").strip()
+                    href = (apply_check.get("href") or "").strip()
+                    text_l = text.lower()
+
+                    if "applied" in text_l or "application submitted" in text_l:
+                        status = "already_applied"
+                        break
+
+                    if "easy apply" in text_l or ("/job-applications/" in href and "/wizard" in href):
+                        status = "can_apply"
+                        break
+
+                    # Anchor present but not yet hydrated to a meaningful state; keep waiting.
+                    status = None
+
+                else:
+                    shadow_status = apply_check.get("status", "unknown")
+                    if shadow_status in {"already_applied", "can_apply"}:
+                        status = shadow_status
+                        break
+                    # Shadow root present but not in a known state; keep polling.
+                    status = None
+
             time.sleep(0.5)
-        
-        if not shadow_content_found:
-            # print("Shadow DOM content not found after multiple attempts")
-            driver.get(original_url)  # Go back to original URL
+
+        if not status:
+            driver.get(original_url)
             return False
-        
-        # Process based on the shadow DOM status
-        if status == 'already_applied':
+
+        if status == "already_applied":
             print(f"Skipping this Job as it is already applied: {job_url}")
             applied = True
-            
-        elif status == 'can_apply':
-            # Click the Easy apply button
-            click_success = driver.execute_script("""
-                const applyButtonWc = document.querySelector('apply-button-wc');
-                if (!applyButtonWc || !applyButtonWc.shadowRoot) return false;
-                
-                // Try three different ways to find the button
-                const easyApplyBtn = 
-                    // Method 1: Direct button in shadow DOM
-                    applyButtonWc.shadowRoot.querySelector('button.btn.btn-primary') ||
-                    // Method 2: Button inside apply-button element
-                    (applyButtonWc.shadowRoot.querySelector('apply-button') && 
-                     applyButtonWc.shadowRoot.querySelector('apply-button').shadowRoot &&
-                     applyButtonWc.shadowRoot.querySelector('apply-button').shadowRoot.querySelector('button.btn.btn-primary')) ||
-                    // Method 3: Find any button containing "Easy apply" text
-                    Array.from(applyButtonWc.shadowRoot.querySelectorAll('button')).find(btn => 
-                        btn.textContent.includes('Easy apply')
-                    );
-                
-                if (!easyApplyBtn) return false;
-                
-                // Click the button
-                easyApplyBtn.click();
-                return true;
-            """)
-            
+
+        elif status == "can_apply":
+            click_success = False
+
+            # Prefer clicking the new anchor if present
+            if apply_kind == "anchor":
+                try:
+                    easy_apply_link = wait.until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "#applyButton a[data-testid='apply-button']"))
+                    )
+                    driver.execute_script("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", easy_apply_link)
+                    time.sleep(0.2)
+                    try:
+                        wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#applyButton a[data-testid='apply-button']")))
+                        easy_apply_link.click()
+                    except Exception:
+                        # Fallback click: overlays/sticky headers can intercept normal click
+                        driver.execute_script("arguments[0].click();", easy_apply_link)
+                    click_success = True
+                except Exception as e:
+                    print(f"Failed to click Easy Apply link: {e}")
+                    click_success = False
+            else:
+                # Fallback: older shadow-DOM web component click
+                click_success = driver.execute_script("""
+                    const applyButtonWc = document.querySelector('apply-button-wc');
+                    if (!applyButtonWc || !applyButtonWc.shadowRoot) return false;
+
+                    const easyApplyBtn =
+                        applyButtonWc.shadowRoot.querySelector('button.btn.btn-primary') ||
+                        (applyButtonWc.shadowRoot.querySelector('apply-button') &&
+                         applyButtonWc.shadowRoot.querySelector('apply-button').shadowRoot &&
+                         applyButtonWc.shadowRoot.querySelector('apply-button').shadowRoot.querySelector('button.btn.btn-primary')) ||
+                        Array.from(applyButtonWc.shadowRoot.querySelectorAll('button')).find(btn =>
+                            (btn.textContent || '').toLowerCase().includes('easy apply')
+                        );
+
+                    if (!easyApplyBtn) return false;
+                    easyApplyBtn.click();
+                    return true;
+                """)
+
             if click_success:
                 # Continue with the application process
                 try:
-                    # Locate the 'Next' button
-                    next_button = wait.until(EC.element_to_be_clickable(
-                        (By.XPATH, "//button[contains(@class, 'btn-next') and normalize-space()='Next']")
-                    ))
+                    # Dice "Easy Apply" is a multi-step wizard. Keep clicking "Next" until "Submit" appears.
+                    next_locator = (
+                        By.XPATH,
+                        "//button[not(@disabled) and (@type='submit' or @type='button') and "
+                        "(normalize-space(.)='Next' or .//span[normalize-space()='Next'])]",
+                    )
+                    submit_locator = (
+                        By.XPATH,
+                        "//button[not(@disabled) and (@type='submit' or @type='button') and "
+                        "(normalize-space(.)='Submit' or .//span[normalize-space()='Submit'])]",
+                    )
+
+                    # Fast polling so we click as soon as buttons appear (avoid long "Submit" waits)
+                    step_wait = WebDriverWait(driver, 12, poll_frequency=0.2)
+                    max_steps = 10
+                    submitted = False
+
+                    for _ in range(max_steps):
+                        # Check immediately for Submit/Next (no blocking waits that delay Next)
+                        submit_candidates = driver.find_elements(*submit_locator)
+                        submit_button = next((b for b in submit_candidates if b.is_displayed() and b.is_enabled()), None)
+                        if submit_button:
+                            driver.execute_script(
+                                "arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});",
+                                submit_button,
+                            )
+                            time.sleep(0.1)
+                            try:
+                                submit_button.click()
+                            except Exception:
+                                driver.execute_script("arguments[0].click();", submit_button)
+                            submitted = True
+                            break
+
+                        next_candidates = driver.find_elements(*next_locator)
+                        next_button = next((b for b in next_candidates if b.is_displayed() and b.is_enabled()), None)
+                        if next_button:
+                            driver.execute_script(
+                                "arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});",
+                                next_button,
+                            )
+                            time.sleep(0.1)
+                            try:
+                                next_button.click()
+                            except Exception:
+                                driver.execute_script("arguments[0].click();", next_button)
+                        else:
+                            # Neither button is ready yet; wait (fast poll) until one becomes clickable.
+                            def _ready_button(d):
+                                for loc in (submit_locator, next_locator):
+                                    try:
+                                        el = d.find_element(*loc)
+                                        if el.is_displayed() and el.is_enabled():
+                                            return el
+                                    except Exception:
+                                        continue
+                                return False
+
+                            step_wait.until(_ready_button)
+                            continue
+
+                        # Let the wizard step render/hydrate (staleness isn't always reliable with React)
+                        time.sleep(0.5)
                     
-                    # Click Next using JavaScript
-                    driver.execute_script("arguments[0].click();", next_button)
-                    
-                    # Locate the 'Submit' button
-                    submit_button = wait.until(EC.element_to_be_clickable(
-                        (By.XPATH, "//button[contains(@class, 'btn-next') and normalize-space()='Submit']")
-                    ))
-                    
-                    # Click Submit using JavaScript
-                    driver.execute_script("arguments[0].click();", submit_button)
-                    
-                    # Wait for confirmation
+                    # Wait for confirmation (Dice has multiple success UIs)
                     try:
-                        confirmation = wait.until(EC.presence_of_element_located(
-                            (By.XPATH, "//header[contains(@class, 'post-apply-banner')]//h1[contains(text(), 'Application submitted')]")
-                        ))
+                        confirmation_wait = WebDriverWait(driver, 30)
+                        confirmation_wait.until(
+                            EC.presence_of_element_located(
+                                (
+                                    By.CSS_SELECTOR,
+                                    '[data-testid="job-application-success-card"]',
+                                )
+                            )
+                        )
                         print(f"Application confirmed for New Job: {job_url}")
                         applied = True
-                    except Exception as e:
-                        print(f"Could not confirm application submission: {e}")
-                        applied = False
+                    except Exception:
+                        # Backwards-compatible fallback for older Dice success banner
+                        try:
+                            confirmation_wait = WebDriverWait(driver, 15)
+                            confirmation_wait.until(
+                                EC.presence_of_element_located(
+                                    (
+                                        By.XPATH,
+                                        "//header[contains(@class, 'post-apply-banner')]//h1[contains(text(), 'Application submitted')]",
+                                    )
+                                )
+                            )
+                            print(f"Application confirmed for New Job: {job_url}")
+                            applied = True
+                        except Exception as e:
+                            print(f"Could not confirm application submission: {e}")
+                            applied = submitted
                         
                 except Exception as e:
                     applied = False
