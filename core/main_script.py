@@ -204,40 +204,42 @@ def apply_to_job_url(driver, job_url):
     pyautogui.moveRel(-1, -1, duration=0.1)
 
     try:
-        # First wait for #applyButton to be present in the DOM
-        wait.until(EC.presence_of_element_located((By.ID, "applyButton")))
-
-        # Dice has shipped multiple variants of the "Easy Apply" control over time:
-        # - Newer: a normal <a data-testid="apply-button">Easy Apply</a> inside #applyButton (no shadow DOM)
-        # - Older: <apply-button-wc> web component with the button in a shadow root
+        # Dice UI has evolved multiple times. Current (Feb 2026) uses:
+        # - button[data-testid="apply-button"] with text "Apply Now" or "Easy Apply"
+        # - Located inside a job-detail-header-card or the older #applyButton container
         #
-        # We poll a few times because the header area can hydrate late.
-        # Poll until the apply control has hydrated to a meaningful state (text/href),
-        # otherwise we can mis-classify too early.
-        max_attempts = 30
+        # We poll until the button appears and has actionable text.
+        max_attempts = 40  # ~20 seconds at 0.5s intervals
         status = None
         apply_kind = None
 
         for _ in range(max_attempts):
             apply_check = driver.execute_script("""
-                // Newer Dice DOM: plain anchor link
+                // 2026 Dice UI: button with data-testid="apply-button"
+                const applyBtn = document.querySelector('button[data-testid="apply-button"]');
+                if (applyBtn) {
+                    const text = (applyBtn.textContent || '').trim();
+                    const disabled = applyBtn.disabled || applyBtn.getAttribute('aria-disabled') === 'true';
+                    return { found: true, kind: 'button', text, disabled };
+                }
+
+                // Fallback: anchor link inside #applyButton (older variant)
                 const applyLink = document.querySelector('#applyButton a[data-testid="apply-button"]');
                 if (applyLink) {
                     const text = (applyLink.textContent || '').trim();
-                    const ariaDisabled = applyLink.getAttribute('aria-disabled');
                     const href = applyLink.getAttribute('href') || '';
-                    return { found: true, kind: 'anchor', text, ariaDisabled, href };
+                    return { found: true, kind: 'anchor', text, href };
                 }
 
-                // Older Dice DOM: shadow DOM web component
+                // Legacy: shadow DOM web component
                 const applyButtonWc = document.querySelector('apply-button-wc');
                 if (applyButtonWc && applyButtonWc.shadowRoot) {
                     const shadowText = applyButtonWc.shadowRoot.textContent || '';
                     if (shadowText.includes('Application Submitted')) {
                         return { found: true, kind: 'shadow', status: 'already_applied' };
                     }
-                    // Some variants use "Easy Apply" / "Easy apply"
-                    if ((shadowText || '').toLowerCase().includes('easy apply')) {
+                    if ((shadowText || '').toLowerCase().includes('easy apply') ||
+                        (shadowText || '').toLowerCase().includes('apply now')) {
                         return { found: true, kind: 'shadow', status: 'can_apply' };
                     }
                     return { found: true, kind: 'shadow', status: 'unknown' };
@@ -249,10 +251,23 @@ def apply_to_job_url(driver, job_url):
             if apply_check and apply_check.get("found"):
                 apply_kind = apply_check.get("kind")
 
-                if apply_kind == "anchor":
-                    # IMPORTANT:
-                    # - Do NOT treat aria-disabled as "already applied" (Dice may disable temporarily / for other reasons)
-                    # - If the anchor exists but text/href isn't ready yet, keep polling instead of deciding early.
+                if apply_kind == "button":
+                    text = (apply_check.get("text") or "").strip()
+                    text_l = text.lower()
+                    disabled = apply_check.get("disabled", False)
+
+                    if "applied" in text_l or "application submitted" in text_l:
+                        status = "already_applied"
+                        break
+
+                    if ("apply now" in text_l or "easy apply" in text_l or "apply" in text_l) and not disabled:
+                        status = "can_apply"
+                        break
+
+                    # Button present but not yet hydrated or still disabled; keep waiting.
+                    status = None
+
+                elif apply_kind == "anchor":
                     text = (apply_check.get("text") or "").strip()
                     href = (apply_check.get("href") or "").strip()
                     text_l = text.lower()
@@ -261,11 +276,10 @@ def apply_to_job_url(driver, job_url):
                         status = "already_applied"
                         break
 
-                    if "easy apply" in text_l or ("/job-applications/" in href and "/wizard" in href):
+                    if "easy apply" in text_l or "apply now" in text_l or ("/job-applications/" in href and "/wizard" in href):
                         status = "can_apply"
                         break
 
-                    # Anchor present but not yet hydrated to a meaningful state; keep waiting.
                     status = None
 
                 else:
@@ -273,7 +287,6 @@ def apply_to_job_url(driver, job_url):
                     if shadow_status in {"already_applied", "can_apply"}:
                         status = shadow_status
                         break
-                    # Shadow root present but not in a known state; keep polling.
                     status = None
 
             time.sleep(0.5)
@@ -289,8 +302,25 @@ def apply_to_job_url(driver, job_url):
         elif status == "can_apply":
             click_success = False
 
-            # Prefer clicking the new anchor if present
-            if apply_kind == "anchor":
+            if apply_kind == "button":
+                # New Dice UI: button[data-testid="apply-button"]
+                try:
+                    apply_button = wait.until(
+                        EC.element_to_be_clickable((By.CSS_SELECTOR, 'button[data-testid="apply-button"]'))
+                    )
+                    driver.execute_script("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", apply_button)
+                    time.sleep(0.2)
+                    try:
+                        apply_button.click()
+                    except Exception:
+                        driver.execute_script("arguments[0].click();", apply_button)
+                    click_success = True
+                except Exception as e:
+                    print(f"Failed to click Apply button: {e}")
+                    click_success = False
+
+            elif apply_kind == "anchor":
+                # Older variant: anchor inside #applyButton
                 try:
                     easy_apply_link = wait.until(
                         EC.presence_of_element_located((By.CSS_SELECTOR, "#applyButton a[data-testid='apply-button']"))
@@ -301,14 +331,14 @@ def apply_to_job_url(driver, job_url):
                         wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#applyButton a[data-testid='apply-button']")))
                         easy_apply_link.click()
                     except Exception:
-                        # Fallback click: overlays/sticky headers can intercept normal click
                         driver.execute_script("arguments[0].click();", easy_apply_link)
                     click_success = True
                 except Exception as e:
                     print(f"Failed to click Easy Apply link: {e}")
                     click_success = False
+
             else:
-                # Fallback: older shadow-DOM web component click
+                # Legacy: shadow-DOM web component click
                 click_success = driver.execute_script("""
                     const applyButtonWc = document.querySelector('apply-button-wc');
                     if (!applyButtonWc || !applyButtonWc.shadowRoot) return false;
@@ -319,7 +349,8 @@ def apply_to_job_url(driver, job_url):
                          applyButtonWc.shadowRoot.querySelector('apply-button').shadowRoot &&
                          applyButtonWc.shadowRoot.querySelector('apply-button').shadowRoot.querySelector('button.btn.btn-primary')) ||
                         Array.from(applyButtonWc.shadowRoot.querySelectorAll('button')).find(btn =>
-                            (btn.textContent || '').toLowerCase().includes('easy apply')
+                            (btn.textContent || '').toLowerCase().includes('easy apply') ||
+                            (btn.textContent || '').toLowerCase().includes('apply now')
                         );
 
                     if (!easyApplyBtn) return false;
