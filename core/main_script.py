@@ -223,12 +223,13 @@ def apply_to_job_url(driver, job_url):
                     return { found: true, kind: 'button', text, disabled };
                 }
 
-                // Fallback: anchor link inside #applyButton (older variant)
-                const applyLink = document.querySelector('#applyButton a[data-testid="apply-button"]');
-                if (applyLink) {
-                    const text = (applyLink.textContent || '').trim();
-                    const href = applyLink.getAttribute('href') || '';
-                    return { found: true, kind: 'anchor', text, href };
+                // 2026 Dice UI variant: anchor <a> with data-testid="apply-button" (can be anywhere in page)
+                const applyAnchor = document.querySelector('a[data-testid="apply-button"]');
+                if (applyAnchor) {
+                    const text = (applyAnchor.textContent || '').trim();
+                    const href = applyAnchor.getAttribute('href') || '';
+                    const ariaDisabled = applyAnchor.getAttribute('aria-disabled');
+                    return { found: true, kind: 'anchor', text, href, ariaDisabled };
                 }
 
                 // Legacy: shadow DOM web component
@@ -239,7 +240,8 @@ def apply_to_job_url(driver, job_url):
                         return { found: true, kind: 'shadow', status: 'already_applied' };
                     }
                     if ((shadowText || '').toLowerCase().includes('easy apply') ||
-                        (shadowText || '').toLowerCase().includes('apply now')) {
+                        (shadowText || '').toLowerCase().includes('apply now') ||
+                        (shadowText || '').toLowerCase().includes('apply')) {
                         return { found: true, kind: 'shadow', status: 'can_apply' };
                     }
                     return { found: true, kind: 'shadow', status: 'unknown' };
@@ -276,7 +278,8 @@ def apply_to_job_url(driver, job_url):
                         status = "already_applied"
                         break
 
-                    if "easy apply" in text_l or "apply now" in text_l or ("/job-applications/" in href and "/wizard" in href):
+                    # Match "Apply", "Easy Apply", "Apply Now", or href pointing to wizard
+                    if text_l in ("apply", "easy apply", "apply now") or "apply" in text_l or ("/job-applications/" in href and "/wizard" in href):
                         status = "can_apply"
                         break
 
@@ -320,21 +323,21 @@ def apply_to_job_url(driver, job_url):
                     click_success = False
 
             elif apply_kind == "anchor":
-                # Older variant: anchor inside #applyButton
+                # Anchor <a> with data-testid="apply-button" (can be anywhere in page)
                 try:
                     easy_apply_link = wait.until(
-                        EC.presence_of_element_located((By.CSS_SELECTOR, "#applyButton a[data-testid='apply-button']"))
+                        EC.presence_of_element_located((By.CSS_SELECTOR, 'a[data-testid="apply-button"]'))
                     )
                     driver.execute_script("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", easy_apply_link)
-                    time.sleep(0.2)
+                    time.sleep(0.3)
                     try:
-                        wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#applyButton a[data-testid='apply-button']")))
+                        wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'a[data-testid="apply-button"]')))
                         easy_apply_link.click()
                     except Exception:
                         driver.execute_script("arguments[0].click();", easy_apply_link)
                     click_success = True
                 except Exception as e:
-                    print(f"Failed to click Easy Apply link: {e}")
+                    print(f"Failed to click Apply link: {e}")
                     click_success = False
 
             else:
